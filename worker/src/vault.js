@@ -130,14 +130,14 @@ export async function generateSettlementVoucher(env, address) {
   const chainId = 137;
 
   const domain = {
-    name: "Trestle-DeFi-Hub",
+    name: "TrestleVault",
     version: "1",
     chainId,
-    verifyingContract: env.REWARD_DISTRIBUTOR_ADDRESS || "0x0000000000000000000000000000000000000000",
+    verifyingContract: env.VAULT_SETTLEMENT_ADDRESS || "0x89e1404902a861DCFedbC685617B6cc986fD852E",
   };
 
   const types = {
-    RewardVoucher: [
+    Voucher: [
       { name: "walletAddress", type: "address" },
       { name: "btrAmount", type: "uint256" },
       { name: "hNobtStaked", type: "uint256" },
@@ -157,7 +157,7 @@ export async function generateSettlementVoucher(env, address) {
   const signature = await signerAccount.signTypedData({
     domain,
     types,
-    primaryType: "RewardVoucher",
+    primaryType: "Voucher",
     message: {
       walletAddress: value.walletAddress,
       btrAmount: value.btrAmount,

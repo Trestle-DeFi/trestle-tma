@@ -23,6 +23,9 @@
   "ai": {
     "binding": "AI"
   },
+  "vars": {
+    "VAULT_SETTLEMENT_ADDRESS": "0x89e1404902a861DCFedbC685617B6cc986fD852E"
+  },
   "observability": {
     "enabled": true
   }

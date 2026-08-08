@@ -1,4 +1,8 @@
 # Treasury Protocol - Development To-Do List
+---
+
+**Legal Disclaimer:** Trestle DeFi (trestle.website) is an independent Web3 ecosystem operating exclusively on the Polygon network. We are not affiliated, associated, authorized, endorsed by, or in any way officially connected with the Celestia-based "Trestle Protocol" bridge project or any of its subsidiaries. 
+
 
 ## ✅ COMPLETED
 
@@ -60,13 +64,20 @@
 
 ---
 
-## 📬 Contact
-- **Website**: [https://trestle.website](https://trestle.website)
-- **GitHub**: [Trestle DeFi](https://github.com/Trestle-DeFi)
-- **Discord**: [Trestle DeFi](https://discord.gg/4dCCvnJYGT)
-- **Telegram**: [Trestle DeFi](https://t.me/TrestleDeFi)
-- **Email**: contact@trestle.website
+### 📬 Contact
 
+- **Website**: [https://trestle.website](https://trestle.website)
+- **Testnet Hub**: [Testnet Hub](https://testnet.trestle.website)
+- **Reward Hub**: [Reward Hub](https://reward.trestle.website)
+- **GitHub**: [Trestle DeFi](https://github.com/Trestle-DeFi)
+- **Documentation**: [https://docs.trestle.website](https://docs.trestle.website)
+- **X (Twitter)**: [Trestle DeFi](https://x.com/Trestle_0xArch)
+- **BlueSky**: [Trestle DeFi](https://bsky.app/profile/trestle-0xarch.bsky.social)
+- **Medium**: [Trestle DeFi](https://medium.com/@trestle_defi)
+- **Discord**: [Trestle DeFi](https://discord.gg/4dCCvnJYGT)
+- **Telegram**: [trestleDeFi](https://t.me/trestleDeFi)
+- **Telegram App**: [trestlehub_bot](https://t.me/trestlehub_bot)
+- **Email**: contact@trestle.website
 ---
 
 **Disclaimer:** Not affiliated with Trestle Protocol (Celestia Bridge).
