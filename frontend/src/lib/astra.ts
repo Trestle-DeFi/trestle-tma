@@ -66,3 +66,7 @@ export async function getTaskRecommendations(userData: any) {
     body: JSON.stringify(userData),
   });
 }
+
+export async function getAstraProviders() {
+  return fetch(`${API_BASE}/api/astra/providers`);
+}

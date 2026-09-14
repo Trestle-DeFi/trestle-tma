@@ -1,5 +1,5 @@
 import { http, fallback } from "viem";
-import { polygon, polygonAmoy } from "viem/chains";
+import { polygon, polygonAmoy, baseSepolia, arbitrumSepolia } from "viem/chains";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { createAppKit } from "@reown/appkit/react";
 
@@ -17,12 +17,24 @@ const amoyTransports = [
   http("https://polygon-amoy.g.alchemy.com/v2/demo", { retryCount: 2, retryDelay: 500 }),
 ].filter(Boolean) as ReturnType<typeof http>[];
 
+const baseSepoliaTransports = [
+  http("https://sepolia.base.org", { retryCount: 2, retryDelay: 500 }),
+  http("https://base-sepolia.g.alchemy.com/v2/demo", { retryCount: 2, retryDelay: 500 }),
+].filter(Boolean) as ReturnType<typeof http>[];
+
+const arbSepoliaTransports = [
+  http("https://sepolia-rollup.arbitrum.io/rpc", { retryCount: 2, retryDelay: 500 }),
+  http("https://arb-sepolia.g.alchemy.com/v2/demo", { retryCount: 2, retryDelay: 500 }),
+].filter(Boolean) as ReturnType<typeof http>[];
+
 const wagmiAdapter = new WagmiAdapter({
   projectId,
-  networks: [polygon, polygonAmoy],
+  networks: [polygon, polygonAmoy, baseSepolia, arbitrumSepolia],
   transports: {
     [polygon.id]: fallback(polygonTransports, { rank: true }),
     [polygonAmoy.id]: fallback(amoyTransports, { rank: true }),
+    [baseSepolia.id]: fallback(baseSepoliaTransports, { rank: true }),
+    [arbitrumSepolia.id]: fallback(arbSepoliaTransports, { rank: true }),
   },
   ssr: true,
 });
@@ -32,7 +44,7 @@ export const config = wagmiAdapter.wagmiConfig;
 createAppKit({
   adapters: [wagmiAdapter],
   projectId,
-  networks: [polygon, polygonAmoy],
+  networks: [polygon, polygonAmoy, baseSepolia, arbitrumSepolia],
   metadata: {
     name: "Trestle DeFi",
     description: "Trestle Telegram Mini App",
@@ -50,4 +62,4 @@ createAppKit({
   },
 });
 
-export { polygon, polygonAmoy };
+export { polygon, polygonAmoy, baseSepolia, arbitrumSepolia };

@@ -36,6 +36,16 @@ const RPCS: Record<number, RpcConfig[]> = {
     { url: "https://polygon-amoy.g.alchemy.com/v2/demo", label: "Alchemy Amoy", weight: 2 },
     { url: "https://rpc.ankr.com/polygon_amoy", label: "Ankr Amoy", weight: 1 },
   ],
+  // Base Sepolia
+  84532: [
+    { url: "https://sepolia.base.org", label: "Official Base Sepolia", weight: 2 },
+    { url: "https://base-sepolia.g.alchemy.com/v2/demo", label: "Alchemy Base Sepolia", weight: 1 },
+  ],
+  // Arbitrum Sepolia
+  421614: [
+    { url: "https://sepolia-rollup.arbitrum.io/rpc", label: "Official Arb Sepolia", weight: 2 },
+    { url: "https://arb-sepolia.g.alchemy.com/v2/demo", label: "Alchemy Arb Sepolia", weight: 1 },
+  ],
 };
 
 function buildBlockscoutRpc(chainId: number): RpcConfig | null {

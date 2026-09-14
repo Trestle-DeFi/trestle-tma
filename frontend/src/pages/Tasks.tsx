@@ -1,107 +1,165 @@
 import { useState, useEffect } from "react";
 import { useContracts } from "../hooks/useContracts";
-import { api } from "../lib/api";
+import { useAuth } from "../hooks/useAuth";
+import { getTasks, getUserStats, completeTask, type Task, type UserStats } from "../lib/reward";
 
-interface Task {
-  id: number;
-  title: string;
-  desc: string;
-  reward: string;
-  type: string;
-  active: boolean;
-}
+const TYPE_COLORS: Record<string, string> = {
+  forum: "bg-blue-100 text-blue-700",
+  social: "bg-green-100 text-green-700",
+  testnet: "bg-amber-100 text-amber-700",
+  special: "bg-pink-100 text-pink-700",
+  mainnet: "bg-purple-100 text-purple-700",
+};
 
-interface CompletedTask {
-  task_id: number;
-  title: string;
-  reward: string;
-  completed_at: string;
-}
+const FREQUENCY_COLORS: Record<string, string> = {
+  daily: "bg-blue-100 text-blue-700",
+  weekly: "bg-green-100 text-green-700",
+  once: "bg-amber-100 text-amber-700",
+  special: "bg-purple-100 text-purple-700",
+};
 
 export default function Tasks() {
-  const { address, isConnected } = useContracts();
+  const { isConnected } = useContracts();
+  const { displayAddress } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [completed, setCompleted] = useState<CompletedTask[]>([]);
-  const [busy, setBusy] = useState<number | null>(null);
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [completedIds, setCompletedIds] = useState<number[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [completing, setCompleting] = useState<number | null>(null);
+  const [filter, setFilter] = useState<string>("all");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<Task[]>("/api/tasks").then(t => setTasks(t.filter(t => t.active))).catch(() => {});
+    setLoading(true);
+    getTasks()
+      .then(t => setTasks(t.filter(task => task.active)))
+      .catch(() => setTasks([]))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (!address) return;
-    api<CompletedTask[]>(`/api/users/${address}/completed`).then(setCompleted).catch(() => {});
-  }, [address]);
-
-  const completeIds = new Set(completed.map(c => c.task_id));
+    if (!displayAddress) return;
+    getUserStats(displayAddress)
+      .then(setUserStats)
+      .catch(() => {});
+  }, [displayAddress]);
 
   const handleComplete = async (taskId: number) => {
-    if (!address || busy !== null) return;
-    setBusy(taskId);
+    if (!displayAddress || completing !== null) return;
+    setCompleting(taskId);
+    setError(null);
     try {
-      await api(`/api/users/${address}/complete-task`, {
-        method: "POST",
-        body: JSON.stringify({ taskId }),
-      });
-      setCompleted(prev => [...prev, { task_id: taskId, title: "", reward: "", completed_at: new Date().toISOString() }]);
+      await completeTask(displayAddress, taskId);
+      setCompletedIds(prev => [...prev, taskId]);
     } catch (e: any) {
-      alert(e.message);
+      setError(e.message || "Failed to complete task");
     }
-    setBusy(null);
+    setCompleting(null);
   };
 
-  if (!isConnected) {
-    return (
-      <div className="text-center py-8">
-        <div className="text-4xl mb-2">🔐</div>
-        <p className="text-gray-500">Connect wallet to view tasks</p>
-      </div>
-    );
-  }
-
-  const todayCompleted = completed.filter(c => {
-    const d = new Date(c.completed_at);
-    const now = new Date();
-    return d.toDateString() === now.toDateString();
-  }).length;
+  const filtered = filter === "all" ? tasks : tasks.filter(t => t.type === filter);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Tasks</h2>
-        <span className="text-xs text-gray-500">{todayCompleted} completed today</span>
+        {userStats && (
+          <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
+            Streak: {userStats.streak}
+          </span>
+        )}
       </div>
-      <p className="text-xs text-gray-500">Complete tasks to earn hNOBT points. Tasks reset daily.</p>
 
-      {tasks.length === 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400">
-          <p className="text-sm">No tasks available yet</p>
+      {!isConnected && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700 text-center">
+          Connect wallet to complete tasks and earn rewards
         </div>
       )}
 
-      <div className="space-y-2">
-        {tasks.map(task => {
-          const done = completeIds.has(task.id);
-          return (
-            <div key={task.id} className={`bg-white rounded-xl border p-4 ${done ? "border-emerald-200 opacity-60" : "border-gray-200"}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-sm">{task.title}</h3>
-                  {task.desc && <p className="text-[11px] text-gray-500 mt-0.5">{task.desc}</p>}
-                </div>
-                <span className="text-xs text-emerald-600 font-medium whitespace-nowrap">+{task.reward} hNOBT</span>
-              </div>
-              <button
-                onClick={() => handleComplete(task.id)}
-                disabled={done || busy === task.id}
-                className={`mt-2 w-full py-2 rounded-lg text-xs font-medium disabled:opacity-50 ${done ? "bg-gray-100 text-gray-400" : "bg-emerald-500 text-white hover:bg-emerald-600"}`}
-              >
-                {done ? "Completed" : busy === task.id ? "Completing..." : "Complete"}
-              </button>
-            </div>
-          );
-        })}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700">
+          {error}
+        </div>
+      )}
+
+      <div className="flex gap-2 overflow-x-auto pb-2">
+        {[
+          { id: "all", label: "All" },
+          { id: "social", label: "Social" },
+          { id: "forum", label: "Forum" },
+          { id: "testnet", label: "Testnet" },
+          { id: "mainnet", label: "Mainnet" },
+          { id: "special", label: "Special" },
+        ].map(f => (
+          <button
+            key={f.id}
+            onClick={() => setFilter(f.id)}
+            className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition ${
+              filter === f.id ? "bg-emerald-500 text-white" : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
+
+      {loading ? (
+        <div className="text-center py-8 text-gray-400 text-sm">Loading tasks...</div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400">
+          <p className="text-sm">No tasks available in this section</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map(task => {
+            const done = completedIds.includes(task.id);
+            return (
+              <div key={task.id} className={`bg-white rounded-xl border p-4 ${done ? "border-emerald-200 opacity-60" : "border-gray-200"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-semibold text-sm">{task.title}</h4>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${TYPE_COLORS[task.type] || "bg-gray-100 text-gray-500"}`}>
+                        {task.type}
+                      </span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${FREQUENCY_COLORS[task.frequency] || "bg-gray-100 text-gray-500"}`}>
+                        {task.frequency}
+                      </span>
+                      {task.verification_type && task.verification_type !== "none" && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">
+                          {task.verification_type}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">{task.desc}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-semibold text-emerald-600">{task.reward} hNOBT</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xs text-emerald-600 font-medium">+{task.reward} hNOBT</span>
+                  <button
+                    onClick={() => handleComplete(task.id)}
+                    disabled={done || completing === task.id || !isConnected}
+                    className={`text-xs px-4 py-2 rounded-lg font-medium transition ${
+                      done
+                        ? "bg-gray-100 text-gray-400 cursor-default"
+                        : !isConnected
+                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          : completing === task.id
+                            ? "bg-emerald-400 text-white"
+                            : "bg-emerald-500 text-white hover:bg-emerald-600"
+                    }`}
+                  >
+                    {done ? "Completed" : completing === task.id ? "Completing..." : "Complete"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -65,6 +65,20 @@ export function Icon({ name, size = 20, className = "" }: { name: string; size?:
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
       </svg>
     ),
+    bounty: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 2l-1 6-6 1 6 1 1 6 1-6 6-1-6-1z"/>
+        <path d="M12 12l7 7"/>
+        <circle cx="17" cy="17" r="4"/>
+      </svg>
+    ),
+    marketplace: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <path d="M16 10a4 4 0 0 1-8 0"/>
+      </svg>
+    ),
   };
   return icons[name] || null;
 }

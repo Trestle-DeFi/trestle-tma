@@ -1,70 +1,72 @@
-# Treasury Protocol - Development To-Do List
----
+# Trestle TMA — Telegram Mini App
 
-**Legal Disclaimer:** Trestle DeFi (trestle.website) is an independent Web3 ecosystem operating exclusively on the Polygon network. We are not affiliated, associated, authorized, endorsed by, or in any way officially connected with the Celestia-based "Trestle Protocol" bridge project or any of its subsidiaries. 
+**Legal Disclaimer:** Trestle DeFi (trestle.website) is an independent Web3 ecosystem. We are not affiliated with the Celestia-based "Trestle Protocol" bridge project or any of its subsidiaries.
 
+## Overview
 
-## ✅ COMPLETED
+Telegram Mini App for Trestle DeFi — unified interface for testnet + reward hub.
 
-### Core Contracts (bugs fixed)
-- [x] DigitalGoods.sol - Added existence checks for orders and listings
-- [x] FreelancerEscrow.sol - Added existence checks for services
-- [x] Tier1Staking.sol - Reset debt on unstake for cleaner state
+- **Dashboard**: Reward stats, chain status, quick actions
+- **Marketplace**: Browse/buy digital goods across testnets + mainnet
+- **Tasks**: Complete tasks to earn hNOBT points
+- **Bug Bounty**: Report vulnerabilities, earn rewards
+- **Stake**: Lock hNOBT, earn yield
+- **Verify**: Biometric + passport verification
 
-## 🔄 IN PROGRESS
+## Stack
 
-### Testnet Contracts
-- [x] Created DigitalRWA.sol for testnet directory
-- [x] Created AIDisputeResolver.sol (off-chain AI optimized)
-- [x] Created HNOBTMining.sol (BroilerPlus LP staking with 5% tax)
-- [ ] Optimize contracts for lower gas fees (currently in progress)
+| Layer | Tech |
+|-------|------|
+| Frontend | React 18, Vite 5, TypeScript, Tailwind CSS |
+| Wallet | Reown AppKit + Wagmi |
+| Telegram | @telegram-apps/sdk v2 |
+| Backend | Cloudflare Worker (Hono) + D1 + KV + AI |
+| Chains | Polygon Mainnet, Polygon Amoy, Base Sepolia, Arbitrum Sepolia |
 
-### Mainnet Integration
-- [ ] Broiler token info: 1,000,000,000,000,000 BRT supply
-- [ ] 5% tax on transfers - slippage adjustment needed (6-7%)
-- [ ] Token address: 0xeCb4cAc0C9e5cBd42a9Ed36467ce8f96072AD58b
-- [ ] BRT/WMATIC Pair: 0xc445b18b3ff85e0691fe416ad91e456f8697b166
+## Structure
 
-### Distribution
-- [ ] 60% to Broiler LP mining
-- [ ] 24% to team members and future employees
-- [ ] 10% to community/airdrop
-- [ ] 5% to bug bounty
-- [ ] 1% to advisors
+```
+trestle-tma/
+├── frontend/          # Vite React app (deployed via CF Pages)
+│   ├── src/
+│   │   ├── pages/     # Dashboard, Marketplace, Tasks, Bounty, Staking, Verify, Withdraw
+│   │   ├── hooks/     # useContracts, useAuth, useTelegram, useTelegramLink
+│   │   ├── lib/       # api, astra, vault, reward, testnet
+│   │   └── components/
+│   └── public/avatars/
+└── worker/            # Cloudflare Worker (vault.trestle.website)
+    └── src/           # index.js, vault.js, provider.js, log.js
+```
 
-## 📋 TODO
+## Setup
 
-### Website Structure
-- [ ] trestle.website
-  - [ ] Landing page with project overview
-  - [ ] Development stages and implementation diagrams
-  - [ ] Links to dapp, testnet, staking, mining pages
+```bash
+# Frontend
+cd frontend
+cp .env .env.local    # fill in WalletConnect project ID
+npm install
+npm run dev
 
-- [ ] testnet.trestle.website
-  - [ ] All testnet activities page
+# Worker
+cd worker
+npm install
+npx wrangler dev
+```
 
-- [ ] reward.trestle.website
-  - [ ] User dashboard and reward hub
-  - [ ] Decentralized Biometric verification integration
-  - [ ] Anti-bot/Sybil measures for airdrop farming prevention
+## Deploy
 
-### Telegram Mini App
-- [ ] Create sub-directory with contracts and front-end
-- [ ] hNOBT token distribution via mini-app tasks
-- [ ] Integration with AI dispute resolution
+- **Frontend**: Push to `main` → GitHub Actions → Cloudflare Pages
+- **Worker**: `npx wrangler deploy`
 
-### AI Integration
-- [ ] Using open-source AI models for DisputeResolver
-- [ ] Off-chain AI analysis with on-chain result submission
-- [ ] AI signature verification for dispute resolutions
+## API Endpoints
 
-### Contract Verification
-- [ ] Verify contracts in deploy script (already implemented)
-- [ ] Add Etherscan verification to CI/CD pipeline
+| Service | URL |
+|---------|-----|
+| Reward API | `https://reward-api.trestle.website` |
+| Testnet API | `https://testnet-api.trestle.website` |
+| Vault Worker | `https://vault.trestle.website` |
 
----
-
-### 📬 Contact
+## 📬 Contact
 
 - **Website**: [https://trestle.website](https://trestle.website)
 - **Testnet Hub**: [Testnet Hub](https://testnet.trestle.website)
@@ -78,6 +80,8 @@
 - **Telegram**: [trestleDeFi](https://t.me/trestleDeFi)
 - **Telegram App**: [trestlehub_bot](https://t.me/trestlehub_bot)
 - **Email**: contact@trestle.website
+
+
 ---
 
 **Disclaimer:** Not affiliated with Trestle Protocol (Celestia Bridge).

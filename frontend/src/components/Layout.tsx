@@ -12,8 +12,10 @@ const EXTERNAL_LINKS = [
 
 const DASHBOARD_TABS = [
   { to: "/", label: "Dashboard", icon: "dashboard" },
+  { to: "/marketplace", label: "Marketplace", icon: "marketplace" },
   { to: "/stake", label: "Stake", icon: "stake" },
   { to: "/tasks", label: "Tasks", icon: "tasks" },
+  { to: "/bounty", label: "Bounty", icon: "bounty" },
   { to: "/verify", label: "Verify", icon: "verify" },
   { to: "/withdraw", label: "Wallet", icon: "wallet" },
 ];
@@ -60,7 +62,7 @@ export default function Layout() {
         </div>
         {!isCorrectChain && (
           <div className="mt-2 p-2 bg-red-100 text-red-700 text-sm rounded text-center">
-            Switch to Polygon Amoy or Polygon Mainnet
+            Switch to a supported testnet
           </div>
         )}
         {isCorrectChain && (

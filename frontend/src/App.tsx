@@ -8,6 +8,7 @@ import Marketplace from "./pages/Marketplace";
 import Staking from "./pages/Staking";
 import Verify from "./pages/Verify";
 import Tasks from "./pages/Tasks";
+import Bounty from "./pages/Bounty";
 import Withdraw from "./pages/Withdraw";
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/stake" element={<Staking />} />
           <Route path="/verify" element={<Verify />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/bounty" element={<Bounty />} />
           <Route path="/withdraw" element={<Withdraw />} />
         </Route>
       </Routes>
