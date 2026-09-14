@@ -32,9 +32,9 @@ const RPCS: Record<number, RpcConfig[]> = {
   ],
   // Polygon Amoy Testnet
   80002: [
+    { url: "https://polygon-amoy.publicnode.com", label: "PublicNode Amoy", weight: 2 },
+    { url: "https://polygon-amoy.drpc.org", label: "dRPC Amoy", weight: 2 },
     { url: "https://rpc-amoy.polygon.technology", label: "Official Amoy", weight: 1 },
-    { url: "https://polygon-amoy.g.alchemy.com/v2/demo", label: "Alchemy Amoy", weight: 2 },
-    { url: "https://rpc.ankr.com/polygon_amoy", label: "Ankr Amoy", weight: 1 },
   ],
   // Base Sepolia
   84532: [

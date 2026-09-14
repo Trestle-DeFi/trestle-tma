@@ -13,8 +13,9 @@ const polygonTransports = [
 ].filter(Boolean) as ReturnType<typeof http>[];
 
 const amoyTransports = [
+  http("https://polygon-amoy.publicnode.com", { retryCount: 2, retryDelay: 500 }),
+  http("https://polygon-amoy.drpc.org", { retryCount: 2, retryDelay: 500 }),
   http("https://rpc-amoy.polygon.technology", { retryCount: 2, retryDelay: 500 }),
-  http("https://polygon-amoy.g.alchemy.com/v2/demo", { retryCount: 2, retryDelay: 500 }),
 ].filter(Boolean) as ReturnType<typeof http>[];
 
 const baseSepoliaTransports = [
