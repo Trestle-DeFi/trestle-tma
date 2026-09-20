@@ -2,12 +2,20 @@
 
 **Legal Disclaimer:** Trestle DeFi (trestle.website) is an independent Web3 ecosystem. We are not affiliated with the Celestia-based "Trestle Protocol" bridge project or any of its subsidiaries.
 
+## Live
+
+- **Web**: https://tma.trestle.website
+- **Telegram**: https://t.me/trestlehub_bot (@trestlehub_bot)
+
+Supported chains (4): Polygon Mainnet (wallet/rewards/chain status), Polygon Amoy,
+Base Sepolia and Arbitrum Sepolia (full marketplace/escrow/RWA contracts).
+
 ## Overview
 
 Telegram Mini App for Trestle DeFi — unified interface for testnet + reward hub.
 
 - **Dashboard**: Reward stats, chain status, quick actions
-- **Marketplace**: Browse/buy digital goods across testnets + mainnet
+- **Marketplace**: Browse/buy digital goods across the 3 testnets (Amoy, Base Sepolia, Arbitrum Sepolia)
 - **Tasks**: Complete tasks to earn hNOBT points
 - **Bug Bounty**: Report vulnerabilities, earn rewards
 - **Stake**: Lock hNOBT, earn yield

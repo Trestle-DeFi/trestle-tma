@@ -20,15 +20,11 @@ const HEALTH_CHECK_INTERVAL = 30_000;
 const TIMEOUT_MS = 5_000;
 
 const RPCS: Record<number, RpcConfig[]> = {
-  // Polygon Mainnet
+  // Polygon Mainnet (endpoints verified live 2026-09-20)
   137: [
-    { url: "https://polygon-rpc.com", label: "Public Polygon RPC", weight: 1 },
-    { url: "https://polygon.llamarpc.com", label: "Llama RPC", weight: 1 },
-    { url: "https://rpc.ankr.com/polygon", label: "Ankr", weight: 1 },
-    { url: "https://polygon.blockpi.network/v1/rpc/public", label: "BlockPI", weight: 1 },
-    { url: "https://polygon-mainnet.g.alchemy.com/v2/demo", label: "Alchemy Demo", weight: 2 },
-    { url: "https://1rpc.io/matic", label: "1RPC", weight: 1 },
     { url: "https://polygon.drpc.org", label: "dRPC", weight: 1 },
+    { url: "https://1rpc.io/matic", label: "1RPC", weight: 1 },
+    { url: "https://polygon-bor-rpc.publicnode.com", label: "PublicNode", weight: 1 },
   ],
   // Polygon Amoy Testnet
   80002: [
@@ -38,12 +34,12 @@ const RPCS: Record<number, RpcConfig[]> = {
   // Base Sepolia
   84532: [
     { url: "https://sepolia.base.org", label: "Official Base Sepolia", weight: 2 },
-    { url: "https://base-sepolia.g.alchemy.com/v2/demo", label: "Alchemy Base Sepolia", weight: 1 },
+    { url: "https://base-sepolia-rpc.publicnode.com", label: "PublicNode Base Sepolia", weight: 1 },
   ],
   // Arbitrum Sepolia
   421614: [
     { url: "https://sepolia-rollup.arbitrum.io/rpc", label: "Official Arb Sepolia", weight: 2 },
-    { url: "https://arb-sepolia.g.alchemy.com/v2/demo", label: "Alchemy Arb Sepolia", weight: 1 },
+    { url: "https://arbitrum-sepolia-rpc.publicnode.com", label: "PublicNode Arb Sepolia", weight: 1 },
   ],
 };
 

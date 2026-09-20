@@ -44,8 +44,9 @@ export default function Dashboard() {
     setLoading(true);
     getGlobalStats().then(setGlobalStats).catch(() => {}).finally(() => setLoading(false));
 
-    // Fetch real chain status from RPCs
-    const chainIds = SUPPORTED_CHAIN_IDS.filter(id => id !== 137); // skip mainnet for status display
+    // Fetch real chain status from RPCs (all 4 supported chains: Polygon
+    // Mainnet + Amoy/Base/Arbitrum testnets)
+    const chainIds = SUPPORTED_CHAIN_IDS;
     Promise.all(chainIds.map(id => fetchChainStatus(id).then(s => [id, s] as const)))
       .then(results => {
         const map: Record<number, ChainStatus> = {};

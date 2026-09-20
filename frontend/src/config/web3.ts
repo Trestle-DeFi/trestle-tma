@@ -5,27 +5,28 @@ import { createAppKit } from "@reown/appkit/react";
 
 export const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID ?? "";
 
+// Transports: verified live 2026-09-20 (polygon-rpc.com now requires an API key,
+// LlamaNodes/Ankr/BlockPI public endpoints are discontinued, Alchemy /v2/demo keys are
+// placeholders — all removed; see TMA-CORRECTIONS-AND-DEPLOY-PLAN.md §6).
 const polygonTransports = [
-  http("https://polygon-rpc.com", { retryCount: 2, retryDelay: 500 }),
-  http("https://polygon.llamarpc.com", { retryCount: 2, retryDelay: 500 }),
-  http("https://rpc.ankr.com/polygon", { retryCount: 2, retryDelay: 500 }),
   http("https://polygon.drpc.org", { retryCount: 2, retryDelay: 500 }),
+  http("https://1rpc.io/matic", { retryCount: 2, retryDelay: 500 }),
+  http("https://polygon-bor-rpc.publicnode.com", { retryCount: 2, retryDelay: 500 }),
 ].filter(Boolean) as ReturnType<typeof http>[];
 
 const amoyTransports = [
   http("https://polygon-amoy.publicnode.com", { retryCount: 2, retryDelay: 500 }),
   http("https://polygon-amoy.drpc.org", { retryCount: 2, retryDelay: 500 }),
-  http("https://rpc-amoy.polygon.technology", { retryCount: 2, retryDelay: 500 }),
 ].filter(Boolean) as ReturnType<typeof http>[];
 
 const baseSepoliaTransports = [
   http("https://sepolia.base.org", { retryCount: 2, retryDelay: 500 }),
-  http("https://base-sepolia.g.alchemy.com/v2/demo", { retryCount: 2, retryDelay: 500 }),
+  http("https://base-sepolia-rpc.publicnode.com", { retryCount: 2, retryDelay: 500 }),
 ].filter(Boolean) as ReturnType<typeof http>[];
 
 const arbSepoliaTransports = [
   http("https://sepolia-rollup.arbitrum.io/rpc", { retryCount: 2, retryDelay: 500 }),
-  http("https://arb-sepolia.g.alchemy.com/v2/demo", { retryCount: 2, retryDelay: 500 }),
+  http("https://arbitrum-sepolia-rpc.publicnode.com", { retryCount: 2, retryDelay: 500 }),
 ].filter(Boolean) as ReturnType<typeof http>[];
 
 const wagmiAdapter = new WagmiAdapter({
