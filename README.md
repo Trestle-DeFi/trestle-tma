@@ -63,18 +63,21 @@ npx wrangler dev
 
 ## Deploy
 
-All deploys run through GitHub Actions (`.github/workflows/` at the repo root):
+**Frontend** deploys automatically: `tma.trestle.website` is a **Cloudflare Pages** project with
+git integration — every push to `main` is built and published by Cloudflare (no GitHub Action).
+
+**GitHub Actions** (`.github/workflows/` at the repo root) cover what Pages cannot:
 
 | Workflow | Trigger | Action |
 |----------|---------|--------|
 | `frontend-ci.yml` | push/PR touching `frontend/**` | `npm ci` → `npm test` → `npm run build` |
-| `deploy-frontend.yml` | push to `main` (paths `frontend/**`) | build → Cloudflare Pages deploy |
 | `deploy-worker.yml` | push to `main` (paths `worker/**`) | `wrangler deploy` → `vault.trestle.website` |
 
 The daily yield cron is a **Cloudflare Cron Trigger** (`5 0 * * *` in `worker/wrangler.jsonc`) — no
 GitHub scheduled workflow is needed.
 
-Requires repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
+Worker deploys require repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+(frontend needs no secrets — Pages builds it from the repo).
 
 ## API Endpoints
 
