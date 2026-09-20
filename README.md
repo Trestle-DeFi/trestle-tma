@@ -66,11 +66,10 @@ npx wrangler dev
 **Frontend** deploys automatically: `tma.trestle.website` is a **Cloudflare Pages** project with
 git integration — every push to `main` is built and published by Cloudflare (no GitHub Action).
 
-**GitHub Actions** (`.github/workflows/` at the repo root) cover what Pages cannot:
+**GitHub Actions** (`.github/workflows/` at the repo root):
 
 | Workflow | Trigger | Action |
 |----------|---------|--------|
-| `frontend-ci.yml` | push/PR touching `frontend/**` | `npm ci` → `npm test` → `npm run build` |
 | `deploy-worker.yml` | push to `main` (paths `worker/**`) | `wrangler deploy` → `vault.trestle.website` |
 
 The daily yield cron is a **Cloudflare Cron Trigger** (`5 0 * * *` in `worker/wrangler.jsonc`) — no
