@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Wrangler local state & secrets (never commit — real secrets live here during wrangler dev)
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Build artifacts / logs / OS
+dist/
+*.log
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
