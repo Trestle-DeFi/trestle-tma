@@ -31,11 +31,11 @@ trestle-tma/
 │   ├── src/
 │   │   ├── pages/     # Dashboard, Marketplace, Tasks, Bounty, Staking, Verify, Withdraw
 │   │   ├── hooks/     # useContracts, useAuth, useTelegram, useTelegramLink
-│   │   ├── lib/       # api, astra, vault, reward, testnet
+│   │   ├── lib/       # api, astra, vault, reward
 │   │   └── components/
 │   └── public/avatars/
 └── worker/            # Cloudflare Worker (vault.trestle.website)
-    └── src/           # index.js, vault.js, provider.js, log.js
+    └── src/           # index.js, vault.js, log.js
 ```
 
 ## Setup
@@ -43,7 +43,7 @@ trestle-tma/
 ```bash
 # Frontend
 cd frontend
-cp .env .env.local    # fill in WalletConnect project ID
+cp .env.example .env.local    # fill in WalletConnect project ID
 npm install
 npm run dev
 
@@ -55,15 +55,24 @@ npx wrangler dev
 
 ## Deploy
 
-- **Frontend**: Push to `main` → GitHub Actions → Cloudflare Pages
-- **Worker**: `npx wrangler deploy`
+All deploys run through GitHub Actions (`.github/workflows/` at the repo root):
+
+| Workflow | Trigger | Action |
+|----------|---------|--------|
+| `frontend-ci.yml` | push/PR touching `frontend/**` | `npm ci` → `npm test` → `npm run build` |
+| `deploy-frontend.yml` | push to `main` (paths `frontend/**`) | build → Cloudflare Pages deploy |
+| `deploy-worker.yml` | push to `main` (paths `worker/**`) | `wrangler deploy` → `vault.trestle.website` |
+
+The daily yield cron is a **Cloudflare Cron Trigger** (`5 0 * * *` in `worker/wrangler.jsonc`) — no
+GitHub scheduled workflow is needed.
+
+Requires repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.
 
 ## API Endpoints
 
 | Service | URL |
 |---------|-----|
 | Reward API | `https://reward-api.trestle.website` |
-| Testnet API | `https://testnet-api.trestle.website` |
 | Vault Worker | `https://vault.trestle.website` |
 
 ## 📬 Contact
