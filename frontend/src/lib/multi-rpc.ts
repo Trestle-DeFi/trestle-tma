@@ -34,7 +34,6 @@ const RPCS: Record<number, RpcConfig[]> = {
   80002: [
     { url: "https://polygon-amoy.publicnode.com", label: "PublicNode Amoy", weight: 2 },
     { url: "https://polygon-amoy.drpc.org", label: "dRPC Amoy", weight: 2 },
-    { url: "https://rpc-amoy.polygon.technology", label: "Official Amoy", weight: 1 },
   ],
   // Base Sepolia
   84532: [

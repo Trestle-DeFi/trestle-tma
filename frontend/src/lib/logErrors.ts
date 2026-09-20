@@ -1,4 +1,4 @@
-const LOG_URL = import.meta.env.VITE_API_URL || "https://reward.trestle.website";
+const LOG_URL = import.meta.env.VITE_REWARD_API_URL || "https://reward-api.trestle.website";
 
 export function initErrorLogging() {
   if (typeof window === "undefined") return;
