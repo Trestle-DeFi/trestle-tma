@@ -76,22 +76,22 @@ export const STAKING_DURATIONS = [
 export type ContractName = "DigitalGoods" | "FreelancerEscrow" | "DigitalRWA";
 
 export const CONTRACT_ADDRESSES: Record<number, Record<ContractName, `0x${string}`>> = {
-  // Polygon Amoy — Redeployed 2026-09-18
+  // Polygon Amoy — DG/RWA 2026-09-25, FreelancerEscrow re-redeployed 2026-10-09 (ZAFRAN-H1)
   80002: {
-    DigitalGoods: "0x756CF434FAB30A18117810B9dC3a8f7F68e891DB",
-    FreelancerEscrow: "0xb02cca2D8Fd71bE960f6C261EAD2f460dF8b0cBb",
-    DigitalRWA: "0xBCe3E78Cac1Dd60857880Eb833700ec09FcF2483",
+    DigitalGoods: "0xBd124c4395b47093CEc78497ec8b098977416396",
+    FreelancerEscrow: "0x05f6B7e45833A4Cb9f934dB4116993b6c2522546",
+    DigitalRWA: "0x7f750E8BD9c9C2685710A03De5307961BC50aF31",
   },
-  // Base Sepolia — Redeployed 2026-09-18
+  // Base Sepolia — DG/RWA 2026-09-24, FreelancerEscrow re-redeployed 2026-10-09 (ZAFRAN-H1)
   84532: {
-    DigitalGoods: "0xe5665d1D2F180D27d328acCBB83f5fBE32A6666A",
-    FreelancerEscrow: "0x1a112d7D350976A7b5015868F4DF3bdC8A46570d",
-    DigitalRWA: "0xb0a742a2302B043718b60053b135dC432C892852",
+    DigitalGoods: "0x89f5394a468343F405285040664Fd77843D2a2e6",
+    FreelancerEscrow: "0xA8fb99180AdfFD8d0986A32f472faD2A17B57D7D",
+    DigitalRWA: "0x5582496273a71E60e457D19773050CC848A2F52C",
   },
-  // Arbitrum Sepolia — Redeployed 2026-09-18
+  // Arbitrum Sepolia — DG/RWA 2026-09-24, FreelancerEscrow re-redeployed 2026-10-09 (ZAFRAN-H1)
   421614: {
-    DigitalGoods: "0xAe743AC8eBE1fe05114bB82F68b51A9a2BabD9Df",
-    FreelancerEscrow: "0x88fB6Ae65B2c6011F4dE243BbDa100dC57Cd5FE5",
-    DigitalRWA: "0x81C11612df53Bf2564CFDEc7C7E11407db6E10Ce",
+    DigitalGoods: "0x6D6C679279f5C680e5a6ef33306F2e9A78577DCa",
+    FreelancerEscrow: "0xFd919cE133d356bdeb0577e6b35b20b7caD69722",
+    DigitalRWA: "0x4eC3777B16FC7Da556B451679A10A8fDFC5Fd48D",
   },
 } as const;
