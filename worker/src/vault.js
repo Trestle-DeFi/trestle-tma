@@ -97,11 +97,19 @@ export async function generateSettlementVoucher(env, address) {
 
   // Require biometric verification for Virtual Vault withdrawals (valid 90 days)
   const biometric = await db.prepare(
-    "SELECT fully_verified, verified_at FROM biometric_verification WHERE user_address = ? AND fully_verified = 1"
+    "SELECT fully_verified, verified_at, biometric_hash FROM biometric_verification WHERE user_address = ? AND fully_verified = 1"
   ).bind(address).first();
 
   if (!biometric) {
     throw new Error("Biometric verification required for Virtual Vault withdrawal");
+  }
+
+  // Defense-in-depth (F4): before the reward-worker fix, fully_verified could
+  // be set without any real passkey — e.g. via the old /api/biometric/verify
+  // flow with an empty biometricHash (stored as "0x"). Require a real hash so
+  // those rows cannot settle.
+  if (!biometric.biometric_hash || biometric.biometric_hash.length <= 3) {
+    throw new Error("Registered passkey required for Virtual Vault withdrawal");
   }
 
   const now = Math.floor(Date.now() / 1000);
