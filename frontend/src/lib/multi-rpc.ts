@@ -44,9 +44,9 @@ const RPCS: Record<number, RpcConfig[]> = {
 };
 
 function buildBlockscoutRpc(chainId: number): RpcConfig | null {
-  const key = import.meta.env.VITE_BLOCKSCOUT_API_KEY || import.meta.env.VITE_PUBLIC_BLOCKSCOUT_API_KEY || "";
-  if (!key) return null;
-  return { url: `https://api.blockscout.com/${chainId}/json-rpc`, label: "Blockscout PRO API", weight: 3, headers: { Authorization: `Bearer ${key}` } };
+  // Blockscout PRO API key must NOT be shipped to the client bundle.
+  // Route Blockscout calls through a server-side proxy instead.
+  return null;
 }
 
 function getRpcs(chainId: number): RpcConfig[] {
