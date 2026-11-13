@@ -1,0 +1,7 @@
+{
+  "name": "set-forget-plugin",
+  "version": "1.0.0",
+  "description": "Set & Forget auto-topup plugin for TMA",
+  "private": true,
+  "main": "index.js"
+}
