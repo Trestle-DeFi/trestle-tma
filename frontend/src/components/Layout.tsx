@@ -18,6 +18,7 @@ const DASHBOARD_TABS = [
   { to: "/bounty", label: "Bounty", icon: "bounty" },
   { to: "/verify", label: "Verify", icon: "verify" },
   { to: "/withdraw", label: "Wallet", icon: "wallet" },
+  { to: "/plugins/set-forget", label: "Auto-Topup", icon: "auto" },
 ];
 
 export default function Layout() {

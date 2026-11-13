@@ -1,0 +1,8 @@
+{
+  "network": "lasnaTestnet",
+  "contract": "TrestleReactiveGuard",
+  "address": "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88",
+  "deployer": "0x9280b24542a52cEE54a78dB65A497D8BeC4BAB94",
+  "timestamp": "2026-11-12T10:35:58.291Z",
+  "txHash": "0xad792fa42cfc767269fc203411e6fdd66e86251f819da57ff37f23a586bebbc4"
+}

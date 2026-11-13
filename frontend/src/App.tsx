@@ -10,6 +10,7 @@ import Verify from "./pages/Verify";
 import Tasks from "./pages/Tasks";
 import Bounty from "./pages/Bounty";
 import Withdraw from "./pages/Withdraw";
+import SetForgetPlugin from "./plugins/setForget/SetForgetPlugin";
 
 export default function App() {
   const { ready, expand } = useTelegram();
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/bounty" element={<Bounty />} />
           <Route path="/withdraw" element={<Withdraw />} />
+          <Route path="/plugins/set-forget" element={<SetForgetPlugin />} />
         </Route>
       </Routes>
     </BrowserRouter>

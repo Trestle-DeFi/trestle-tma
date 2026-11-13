@@ -1,0 +1,41 @@
+{
+  "name": "setForget-plugin",
+  "version": "1.0.0",
+  "description": "Set & Forget auto-topup plugin for TMA",
+  "author": "Trestle DeFi",
+  "license": "MIT",
+  "tags": ["automation", "gas-management", "reactive"],
+  "dependencies": ["wallet-connect", "contracts"],
+  "permissions": ["read:subaccounts", "write:subaccounts", "callback"],
+  "routes": [
+    "/plugins/set-forget/subaccounts",
+    "/plugins/set-forget/vaults",
+    "/plugins/set-forget/reactive"
+  ],
+  "networkConfig": {
+    "baseSepolia": {
+      "chainId": 84532,
+      "rpcUrl": "https://sepolia.base.org",
+      "contract": "TrestleMainVault",
+      "role": "origin",
+      "purpose": "Main vault for reserve funds"
+    },
+    "unichainSepolia": {
+      "chainId": 1301,
+      "rpcUrl": "https://sepolia.unichain.org",
+      "contract": "TrestleSubAccount",
+      "role": "destination",
+      "purpose": "Operational sub-account for escrows"
+    },
+    "lasnaTestnet": {
+      "chainId": 5318007,
+      "rpcUrl": "https://lasna-rpc.rnk.dev/",
+      "contract": "TrestleReactiveGuard",
+      "role": "reactive",
+      "purpose": "Reactive subscription and callback triggering"
+    }
+  },
+  "crossChainFlow": "Unichain Sepolia (SubAccount) -> Lasna Testnet (ReactiveGuard) -> Base Sepolia (MainVault)",
+  "hackathon": "Reactive Omni Buildathon",
+  "version": "37"
+}
