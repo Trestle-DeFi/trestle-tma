@@ -5,10 +5,15 @@
   "description": "Trestle TMA worker services",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run"
   },
   "dependencies": {
     "hono": "^4.13.18",
     "viem": "^2.57.19"
+  },
+  "devDependencies": {
+    "wrangler": "4.161.0"
   }
 }
