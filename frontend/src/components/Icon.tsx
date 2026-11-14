@@ -79,6 +79,19 @@ export function Icon({ name, size = 20, className = "" }: { name: string; size?:
         <path d="M16 10a4 4 0 0 1-8 0"/>
       </svg>
     ),
+    auto: (
+      <svg viewBox="0 0 24 24" width={size} height={size} className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3v3"/>
+        <path d="M12 18v3"/>
+        <path d="M3 12h3"/>
+        <path d="M18 12h3"/>
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M5.6 5.6l2.1 2.1"/>
+        <path d="M16.3 16.3l2.1 2.1"/>
+        <path d="M18.4 5.6l-2.1 2.1"/>
+        <path d="M7.7 16.3l-2.1 2.1"/>
+      </svg>
+    ),
   };
   return icons[name] || null;
 }

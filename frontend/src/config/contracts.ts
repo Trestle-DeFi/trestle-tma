@@ -3,10 +3,15 @@ export const TESTNET_API = import.meta.env.VITE_TESTNET_API_URL || "https://vaul
 export const VAULT_API = import.meta.env.VITE_VAULT_API_URL || "https://vault.trestle.website";
 export const AI_API = import.meta.env.VITE_AI_API_URL || "https://ai.trestle.website";
 
+// Set & Forget plugin API — served by the trestle-vault worker (vault.trestle.website),
+// NOT by the reward API. Reward-hub calls (tasks/verify/bounty) stay on REWARD_API.
+export const PLUGIN_API = import.meta.env.VITE_PLUGIN_API_URL || VAULT_API;
+
 // Legacy aliases
 export const API_BASE = REWARD_API;
 export const AI_API_BASE = AI_API;
 export const VAULT_API_BASE = VAULT_API;
+export const PLUGIN_API_BASE = PLUGIN_API;
 
 export const LINKS = {
   mainSite: import.meta.env.VITE_MAIN_SITE_URL || "https://trestle.website",
@@ -50,6 +55,22 @@ export const CHAIN_CONFIG = {
     rpc: "https://sepolia-rollup.arbitrum.io/rpc",
     explorer: "https://sepolia.arbiscan.io",
     currency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  },
+  unichainSepolia: {
+    id: 1301,
+    name: "Unichain Sepolia",
+    shortName: "Unichain",
+    rpc: "https://sepolia.unichain.org",
+    explorer: "https://unichain-sepolia.blockscout.com",
+    currency: { name: "ETH", symbol: "ETH", decimals: 18 },
+  },
+  lasna: {
+    id: 5318007,
+    name: "Lasna Testnet",
+    shortName: "Lasna",
+    rpc: "https://lasna-rpc.rnk.dev/",
+    explorer: "https://lasna.reactscan.net",
+    currency: { name: "REACT", symbol: "lREACT", decimals: 18 },
   },
 } as const;
 
@@ -95,3 +116,33 @@ export const CONTRACT_ADDRESSES: Record<number, Record<ContractName, `0x${string
     DigitalRWA: "0x4eC3777B16FC7Da556B451679A10A8fDFC5Fd48D",
   },
 } as const;
+
+// ─── Set & Forget (auto-topup) contracts ─────────────────────────────────
+// Separate contract family from the marketplace contracts above. The marketplace
+// contracts are NOT deployed on Unichain Sepolia / Lasna — the auto-topup plugin
+// owns those chains instead.
+export const SET_FORGET_CONTRACTS = {
+  mainVault: {
+    chainId: 84532,
+    address: "0xd05d1626f7FB992F0B9862EeE29F4Ca688688Be7",
+    name: "TrestleMainVault",
+    role: "origin",
+  },
+  subAccount: {
+    chainId: 1301,
+    address: "0x976c6D9F4544E0b2f471698AdaeF54777C6FA3D2",
+    name: "TrestleSubAccount",
+    role: "destination",
+  },
+  reactiveGuard: {
+    chainId: 5318007,
+    address: "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88",
+    name: "TrestleReactiveGuard",
+    role: "reactive",
+  },
+} as const;
+
+export type SetForgetContractName = keyof typeof SET_FORGET_CONTRACTS;
+
+// Chains where the marketplace contracts are actually deployed.
+export const MARKETPLACE_CHAIN_IDS = Object.keys(CONTRACT_ADDRESSES).map(Number);

@@ -24,7 +24,9 @@
     "binding": "AI"
   },
   "vars": {
-    "VAULT_SETTLEMENT_ADDRESS": "0x89e1404902a861DCFedbC685617B6cc986fD852E"
+    "VAULT_SETTLEMENT_ADDRESS": "0x89e1404902a861DCFedbC685617B6cc986fD852E",
+    "REACTIVE_GUARD_ADDRESS": "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88",
+    "LASNA_RPC_URL": "https://lasna-rpc.rnk.dev/"
   },
   "observability": {
     "enabled": true

@@ -1,9 +1,23 @@
-import { http, fallback } from "viem";
-import { polygon, polygonAmoy, baseSepolia, arbitrumSepolia } from "viem/chains";
+import { http, fallback, defineChain } from "viem";
+import { polygon, polygonAmoy, baseSepolia, arbitrumSepolia, unichainSepolia } from "viem/chains";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { createAppKit } from "@reown/appkit/react";
 
 export const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID ?? "";
+
+// Lasna Testnet (Reactive Network) — custom chain, not bundled with viem
+export const lasna = defineChain({
+  id: 5318007,
+  name: "Lasna Testnet",
+  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: {
+    default: { http: ["https://lasna-rpc.rnk.dev/"] },
+  },
+  blockExplorers: {
+    default: { name: "Lasna Explorer", url: "https://lasna.reactscan.net" },
+  },
+  testnet: true,
+});
 
 // Transports: verified live 2026-09-20 (polygon-rpc.com now requires an API key,
 // LlamaNodes/Ankr/BlockPI public endpoints are discontinued, Alchemy /v2/demo keys are
@@ -29,14 +43,25 @@ const arbSepoliaTransports = [
   http("https://arbitrum-sepolia-rpc.publicnode.com", { retryCount: 2, retryDelay: 500 }),
 ].filter(Boolean) as ReturnType<typeof http>[];
 
+const unichainSepoliaTransports = [
+  http("https://sepolia.unichain.org", { retryCount: 2, retryDelay: 500 }),
+  http("https://unichain-sepolia-rpc.publicnode.com", { retryCount: 2, retryDelay: 500 }),
+].filter(Boolean) as ReturnType<typeof http>[];
+
+const lasnaTransports = [
+  http("https://lasna-rpc.rnk.dev/", { retryCount: 2, retryDelay: 500 }),
+].filter(Boolean) as ReturnType<typeof http>[];
+
 const wagmiAdapter = new WagmiAdapter({
   projectId,
-  networks: [polygon, polygonAmoy, baseSepolia, arbitrumSepolia],
+  networks: [polygon, polygonAmoy, baseSepolia, arbitrumSepolia, unichainSepolia, lasna],
   transports: {
     [polygon.id]: fallback(polygonTransports, { rank: true }),
     [polygonAmoy.id]: fallback(amoyTransports, { rank: true }),
     [baseSepolia.id]: fallback(baseSepoliaTransports, { rank: true }),
     [arbitrumSepolia.id]: fallback(arbSepoliaTransports, { rank: true }),
+    [unichainSepolia.id]: fallback(unichainSepoliaTransports, { rank: true }),
+    [lasna.id]: fallback(lasnaTransports, { rank: true }),
   },
   ssr: true,
 });
@@ -46,7 +71,7 @@ export const config = wagmiAdapter.wagmiConfig;
 createAppKit({
   adapters: [wagmiAdapter],
   projectId,
-  networks: [polygon, polygonAmoy, baseSepolia, arbitrumSepolia],
+  networks: [polygon, polygonAmoy, baseSepolia, arbitrumSepolia, unichainSepolia, lasna],
   metadata: {
     name: "Trestle DeFi",
     description: "Trestle Telegram Mini App",
@@ -64,4 +89,4 @@ createAppKit({
   },
 });
 
-export { polygon, polygonAmoy, baseSepolia, arbitrumSepolia };
+export { polygon, polygonAmoy, baseSepolia, arbitrumSepolia, unichainSepolia };

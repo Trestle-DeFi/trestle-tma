@@ -6,10 +6,14 @@ import {
   toggleStaking, applyYield, generateSettlementVoucher, processAllYields,
 } from "./vault.js";
 import { writeLog } from "./log.js";
+import setForgetPlugin from "./plugins/setForget/index.js";
 
 const app = new Hono();
 
 app.use("/*", cors());
+
+// Mount Set & Forget plugin routes (/api/plugins/set-forget/*)
+app.route("/", setForgetPlugin);
 
 let initialized = false;
 function ensureInitialized(env) {

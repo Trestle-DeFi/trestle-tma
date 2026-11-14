@@ -1,7 +1,21 @@
 import { useState, useMemo } from "react";
 import { useContracts } from "../hooks/useContracts";
 import { useOnChainListings, type OnChainListing } from "../hooks/useOnChainListings";
-import { LINKS, CONTRACT_ADDRESSES } from "../config/contracts";
+import {
+  LINKS,
+  CONTRACT_ADDRESSES,
+  CHAIN_CONFIG,
+  MARKETPLACE_CHAIN_IDS,
+  type ChainKey,
+} from "../config/contracts";
+
+function chainKeyById(chainId: number): ChainKey {
+  return (
+    Object.keys(CHAIN_CONFIG).find(
+      k => CHAIN_CONFIG[k as ChainKey].id === chainId
+    ) as ChainKey
+  );
+}
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
@@ -26,6 +40,9 @@ export default function Marketplace() {
   const { isConnected, isCorrectChain, chainId, explorer } = useContracts();
   const { listings, loading } = useOnChainListings();
   const [filter, setFilter] = useState<string>("all");
+
+  // Marketplace contracts only exist on a subset of supported chains.
+  const hasMarketplaceContracts = !!CONTRACT_ADDRESSES[chainId];
 
   const filtered = useMemo(() => {
     if (filter === "all") return listings;
@@ -90,15 +107,35 @@ export default function Marketplace() {
         <div className="text-center py-8 text-gray-400 text-sm">Loading on-chain data...</div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-6 text-center text-gray-400">
-          <p className="text-sm">No listings on this chain yet</p>
-          <a
-            href={LINKS.testnet}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block mt-3 text-xs text-emerald-600 hover:underline"
-          >
-            Create listing on Testnet Hub
-          </a>
+          {hasMarketplaceContracts ? (
+            <>
+              <p className="text-sm">No listings on this chain yet</p>
+              <a
+                href={LINKS.testnet}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-3 text-xs text-emerald-600 hover:underline"
+              >
+                Create listing on Testnet Hub
+              </a>
+            </>
+          ) : (
+            <>
+              <p className="text-sm">Marketplace contracts are not deployed on this chain</p>
+              <p className="text-xs mt-2">
+                Marketplace listings are available on{' '}
+                {MARKETPLACE_CHAIN_IDS.map(id => CHAIN_CONFIG[chainKeyById(id)]?.shortName ?? id).join(', ')}.
+              </p>
+              <a
+                href={LINKS.testnet}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-3 text-xs text-emerald-600 hover:underline"
+              >
+                Switch chain on Testnet Hub
+              </a>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-3">

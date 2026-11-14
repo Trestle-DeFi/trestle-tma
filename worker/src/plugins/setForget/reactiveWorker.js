@@ -1,140 +1,263 @@
-import { privateKeyToAccount } from "viem/accounts";
+import { createPublicClient, http, keccak256, toHex } from "viem";
 
-let signerAccount = null;
+// ─── On-chain configuration ────────────────────────────────────────────────
+// ReactiveGuard lives on Lasna (Reactive Network testnet, chainId 5318007).
+export const DEFAULT_GUARD_ADDRESS = "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88";
+export const DEFAULT_LASNA_RPC = "https://lasna-rpc.rnk.dev/";
 
-export function initVaultSigner(privateKey) {
-  if (!privateKey) {
-    console.warn("SIGNER_PRIVATE_KEY not set — vault settlement signing disabled");
-    return null;
-  }
-  const key = privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`;
-  signerAccount = privateKeyToAccount(key);
-  return signerAccount;
-}
+// topic0 of the origin-chain event the guard reacts to:
+//   LowBalanceDetected(address indexed subAccount, uint256 currentBalance, uint256 targetTopUp, uint64 sequence)
+export const LOW_BALANCE_TOPIC = keccak256(
+  toHex("LowBalanceDetected(address,uint256,uint256,uint64)")
+);
 
-export function getVaultSignerAddress() {
-  return signerAccount?.address ?? null;
-}
-
-export async function generateSettlementVoucher(db, env, address) {
-  const bal = await getVirtualBalance(db, address);
-
-  if (BigInt(bal.btr_claimable) <= 0n && BigInt(bal.virtual_hnobt) <= 0n) {
-    throw new Error("Nothing to settle");
-  }
-
-  let nonceRow = await db.prepare("SELECT * FROM settlement_nonces WHERE user_address = ?").bind(address).first();
-  const nonce = nonceRow ? nonceRow.nonce + 1 : 0;
-  if (!nonceRow) {
-    await db.prepare("INSERT INTO settlement_nonces (user_address, nonce) VALUES (?, ?)").bind(address, nonce).run();
-  } else {
-    await db.prepare("UPDATE settlement_nonces SET nonce = ? WHERE user_address = ?").bind(nonce, address).run();
-  }
-
-  const deadline = Math.floor(Date.now() / 1000) + 600;
-  const btrAmount = bal.btr_claimable;
-  const hNobtStaked = bal.virtual_hnobt;
-
-  const chainId = 137;
-
-  const domain = {
-    name: "TrestleVault",
-    version: "1",
-    chainId,
-    verifyingContract: env.VAULT_SETTLEMENT_ADDRESS || "0x89e1404902a861DCFedbC685617B6cc986fD852E",
-  };
-
-  const types = {
-    Voucher: [
-      { name: "walletAddress", type: "address" },
-      { name: "btrAmount", type: "uint256" },
-      { name: "hNobtStaked", type: "uint256" },
-      { name: "nonce", type: "uint256" },
-      { name: "deadline", type: "uint256" },
+const GUARD_ABI = [
+  {
+    type: "function",
+    name: "subscriptionCount",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getSubscriptionStatus",
+    stateMutability: "view",
+    inputs: [{ name: "subAccount", type: "address" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "subAccount", type: "address" },
+          { name: "mainVault", type: "address" },
+          { name: "callbackUrl", type: "string" },
+          { name: "isActive", type: "bool" },
+          { name: "createdAt", type: "uint256" },
+          { name: "lastEventHash", type: "bytes32" },
+          { name: "lastCooldownBlock", type: "uint256" },
+          { name: "maxDailyRefills", type: "uint64" },
+          { name: "dailyRefillCount", type: "uint64" },
+          { name: "lastRefillDay", type: "uint256" },
+        ],
+      },
     ],
-  };
+  },
+];
 
-  const value = {
-    walletAddress: address,
-    btrAmount: btrAmount,
-    hNobtStaked: hNobtStaked,
-    nonce: BigInt(nonce),
-    deadline: BigInt(deadline),
+export function guardConfig(env = {}) {
+  return {
+    guardAddress: env.REACTIVE_GUARD_ADDRESS || DEFAULT_GUARD_ADDRESS,
+    rpcUrl: env.LASNA_RPC_URL || DEFAULT_LASNA_RPC,
   };
+}
 
-  const signature = await signerAccount.signTypedData({
-    domain,
-    types,
-    primaryType: "Voucher",
-    message: {
-      walletAddress: value.walletAddress,
-      btrAmount: value.btrAmount,
-      hNobtStaked: value.hNobtStaked,
-      nonce: value.nonce,
-      deadline: value.deadline,
-    },
+function lasnaClient(env = {}) {
+  const { rpcUrl } = guardConfig(env);
+  return createPublicClient({ transport: http(rpcUrl) });
+}
+
+// ─── D1 helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Read the on-chain subscription for a sub-account from the ReactiveGuard.
+ */
+export async function readOnChainSubscription(env, subAccountAddress) {
+  const { guardAddress } = guardConfig(env);
+  const client = lasnaClient(env);
+  const status = await client.readContract({
+    address: guardAddress,
+    abi: GUARD_ABI,
+    functionName: "getSubscriptionStatus",
+    args: [subAccountAddress],
   });
 
-  await db.prepare(
-    "UPDATE virtual_balances SET virtual_hnobt = '0', btr_claimable = '0', staking_active = 0, staking_tier = 0, last_yield_time = NULL, updated_at = datetime('now') WHERE user_address = ?"
-  ).bind(address).run();
-
   return {
-    voucher: {
-      walletAddress: address,
-      btrAmount,
-      hNobtStaked,
-      nonce,
-      deadline,
-    },
-    signature,
-    domain,
+    subAccount: status.subAccount,
+    mainVault: status.mainVault,
+    callbackUrl: status.callbackUrl,
+    isActive: status.isActive,
+    createdAt: Number(status.createdAt),
+    lastEventHash: status.lastEventHash,
+    lastCooldownBlock: Number(status.lastCooldownBlock),
+    maxDailyRefills: Number(status.maxDailyRefills),
+    dailyRefillCount: Number(status.dailyRefillCount),
+    lastRefillDay: Number(status.lastRefillDay),
   };
 }
 
-export async function processReactiveCallback(db, subAccountAddress, requestId, amount) {
-  // Process reactive callback from MainVault
-  // Validate callback authorization
-  // Update sub-account balance
-  // Log the event
+/**
+ * Read the live on-chain subscription count from the ReactiveGuard on Lasna.
+ */
+export async function readOnChainSubscriptionCount(env) {
+  const { guardAddress } = guardConfig(env);
+  const client = lasnaClient(env);
+  const count = await client.readContract({
+    address: guardAddress,
+    abi: GUARD_ABI,
+    functionName: "subscriptionCount",
+  });
+  return Number(count);
+}
 
-  const subAccount = await getSubAccount(db, subAccountAddress);
+function mapSubscription(row) {
+  return {
+    id: row.id,
+    subAccountAddress: row.sub_account_address,
+    lasnaTopic: row.lasna_topic,
+    callbackUrl: row.callback_url,
+    isActive: !!row.is_active,
+    lastCheck: row.last_check ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Persist a subscription in D1. Re-subscribing the same sub-account updates
+ * the existing row rather than creating a duplicate.
+ */
+export async function persistSubscription(db, subAccountAddress, callbackUrl, lasnaTopic = LOW_BALANCE_TOPIC) {
+  const now = Math.floor(Date.now() / 1000);
+  const existing = await db.prepare(
+    "SELECT id FROM reactive_subscriptions WHERE sub_account_address = ?"
+  ).bind(subAccountAddress).first();
+
+  if (existing) {
+    await db.prepare(
+      "UPDATE reactive_subscriptions SET callback_url = ?, lasna_topic = ?, is_active = 1, last_check = ? WHERE id = ?"
+    ).bind(callbackUrl, lasnaTopic, now, existing.id).run();
+  } else {
+    await db.prepare(
+      "INSERT INTO reactive_subscriptions (sub_account_address, lasna_topic, callback_url, is_active, last_check, created_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(subAccountAddress, lasnaTopic, callbackUrl, now, now).run();
+  }
+
+  const row = await db.prepare(
+    "SELECT * FROM reactive_subscriptions WHERE sub_account_address = ?"
+  ).bind(subAccountAddress).first();
+
+  return mapSubscription(row);
+}
+
+export async function listSubscriptions(db) {
+  const { results } = await db.prepare(
+    "SELECT * FROM reactive_subscriptions ORDER BY created_at DESC"
+  ).all();
+  return (results || []).map(mapSubscription);
+}
+
+/**
+ * Build the aggregate status the TMA plugin renders.
+ *
+ * `isConnected` reflects real reachability of the Lasna RPC — it is never faked.
+ * `subscriptionCount` is the on-chain guard count; `pendingCount` and
+ * `lastTrigger` come from the worker's own D1 state.
+ */
+export async function getReactiveStatus(db, env = {}) {
+  const { guardAddress } = guardConfig(env);
+
+  let onChainSubscriptionCount = 0;
+  let isConnected = false;
+  let lastError;
+  let subscriptions = [];
+
+  try {
+    onChainSubscriptionCount = await readOnChainSubscriptionCount(env);
+    isConnected = true;
+  } catch (e) {
+    lastError = `Lasna RPC unreachable: ${e.message}`;
+  }
+
+  // Merge the D1 mirror with live on-chain truth where possible.
+  const stored = await listSubscriptions(db).catch(() => []);
+  subscriptions = await Promise.all(
+    stored.map(async (sub) => {
+      if (!isConnected) return sub;
+      try {
+        const chain = await readOnChainSubscription(env, sub.subAccountAddress);
+        return {
+          ...sub,
+          isActive: chain.isActive,
+          onChain: {
+            mainVault: chain.mainVault,
+            callbackUrl: chain.callbackUrl,
+            maxDailyRefills: chain.maxDailyRefills,
+            dailyRefillCount: chain.dailyRefillCount,
+            lastRefillDay: chain.lastRefillDay,
+            createdAt: chain.createdAt,
+          },
+        };
+      } catch {
+        return sub;
+      }
+    })
+  );
+
+  const pendingRow = await db.prepare(
+    "SELECT COUNT(*) AS c FROM topup_requests WHERE status = 'pending'"
+  ).first().catch(() => null);
+
+  const lastEventRow = await db.prepare(
+    "SELECT MAX(timestamp) AS t FROM sub_account_events"
+  ).first().catch(() => null);
+
+  const lastTriggerTs = lastEventRow?.t ? Number(lastEventRow.t) : null;
+
+  return {
+    subscriptionCount: onChainSubscriptionCount,
+    onChainSubscriptionCount,
+    pendingCount: pendingRow ? Number(pendingRow.c) : 0,
+    lastTrigger: lastTriggerTs ? new Date(lastTriggerTs * 1000).toISOString() : null,
+    isConnected,
+    guardAddress,
+    subscriptions,
+    ...(lastError ? { lastError } : {}),
+  };
+}
+
+/**
+ * Handle a reactive callback delivered to the worker's callback endpoint.
+ * Records the top-up request and emits an audit event.
+ */
+export async function processReactiveCallback(db, env, { subAccountAddress, requestId, amount, eventData }) {
+  const subAccount = await db.prepare(
+    "SELECT * FROM sub_accounts WHERE user_address = ?"
+  ).bind(subAccountAddress).first();
+
   if (!subAccount) {
     throw new Error(`Sub-account not found: ${subAccountAddress}`);
   }
-
-  if (!subAccount.isActive) {
+  if (!subAccount.is_active) {
     throw new Error(`Sub-account is not active: ${subAccountAddress}`);
   }
 
-  // TODO: Add callback authorization validation
-  // TODO: Add balance update logic
-  // TODO: Add event logging
+  const now = Math.floor(Date.now() / 1000);
+
+  if (requestId) {
+    await db.prepare(
+      `INSERT INTO topup_requests (request_id, sub_account_address, amount, status, created_at, callback_triggered_at, expires_at, callback_data)
+       VALUES (?, ?, ?, 'settled', ?, ?, ?, ?)
+       ON CONFLICT(request_id) DO UPDATE SET status = 'settled', callback_triggered_at = excluded.callback_triggered_at, callback_data = excluded.callback_data`
+    ).bind(
+      requestId,
+      subAccountAddress,
+      String(amount ?? "0"),
+      now,
+      now,
+      now + 3600,
+      eventData ? JSON.stringify(eventData) : null
+    ).run();
+  }
 
   await db.prepare(
-    "INSERT INTO sub_account_events (sub_account_address, event_type, current_balance, target_top_up, timestamp) VALUES (?, ?, ?, ?, ?)"
+    "INSERT INTO sub_account_events (sub_account_address, event_type, current_balance, target_top_up, timestamp, details) VALUES (?, ?, ?, ?, ?, ?)"
   ).bind(
     subAccountAddress,
     "TopUpReceived",
-    amount,
-    0,
-    Math.floor(Date.now() / 1000)
+    String(amount ?? "0"),
+    "0",
+    now,
+    eventData ? JSON.stringify(eventData) : null
   ).run();
-}
 
-// Helper function to get virtual balance
-async function getVirtualBalance(db, address) {
-  let row = await db.prepare("SELECT * FROM virtual_balances WHERE user_address = ?").bind(address).first();
-  if (!row) {
-    await db.prepare("INSERT INTO virtual_balances (user_address) VALUES (?)").bind(address).run();
-    row = { user_address: address, virtual_hnobt: "0", btr_claimable: "0", staking_active: 0, staking_tier: 0, last_yield_time: null };
-  }
-  return row;
-}
-
-// Helper function to get sub-account
-async function getSubAccount(db, address) {
-  return await db.prepare(
-    "SELECT * FROM sub_accounts WHERE user_address = ?"
-  ).bind(address).first();
+  return { success: true, requestId, amount: String(amount ?? "0"), timestamp: now };
 }

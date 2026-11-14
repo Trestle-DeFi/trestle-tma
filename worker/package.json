@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "description": "Trestle TMA worker services",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "deploy": "wrangler deploy",
-    "deploy:dry-run": "wrangler deploy --dry-run"
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "hono": "^4.13.18",

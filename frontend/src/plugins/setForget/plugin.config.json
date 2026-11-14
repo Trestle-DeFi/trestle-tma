@@ -8,15 +8,18 @@
   "dependencies": ["wallet-connect", "contracts"],
   "permissions": ["read:subaccounts", "write:subaccounts", "callback"],
   "routes": [
-    "/plugins/set-forget/subaccounts",
-    "/plugins/set-forget/vaults",
-    "/plugins/set-forget/reactive"
+    "/api/plugins/set-forget/subaccounts",
+    "/api/plugins/set-forget/reactive/subscription",
+    "/api/plugins/set-forget/reactive/status",
+    "/api/plugins/set-forget/reactive/callback"
   ],
   "networkConfig": {
     "baseSepolia": {
       "chainId": 84532,
       "rpcUrl": "https://sepolia.base.org",
       "contract": "TrestleMainVault",
+      "contractAddress": "0xd05d1626f7FB992F0B9862EeE29F4Ca688688Be7",
+      "explorer": "https://sepolia.basescan.org",
       "role": "origin",
       "purpose": "Main vault for reserve funds"
     },
@@ -24,6 +27,8 @@
       "chainId": 1301,
       "rpcUrl": "https://sepolia.unichain.org",
       "contract": "TrestleSubAccount",
+      "contractAddress": "0x976c6D9F4544E0b2f471698AdaeF54777C6FA3D2",
+      "explorer": "https://unichain-sepolia.blockscout.com",
       "role": "destination",
       "purpose": "Operational sub-account for escrows"
     },
@@ -31,9 +36,15 @@
       "chainId": 5318007,
       "rpcUrl": "https://lasna-rpc.rnk.dev/",
       "contract": "TrestleReactiveGuard",
+      "contractAddress": "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88",
+      "explorer": "https://lasna.reactscan.net",
       "role": "reactive",
       "purpose": "Reactive subscription and callback triggering"
     }
+  },
+  "api": {
+    "baseUrl": "https://vault.trestle.website",
+    "note": "Plugin routes are served by the trestle-vault worker, not the reward API."
   },
   "crossChainFlow": "Unichain Sepolia (SubAccount) -> Lasna Testnet (ReactiveGuard) -> Base Sepolia (MainVault)",
   "hackathon": "Reactive Omni Buildathon",

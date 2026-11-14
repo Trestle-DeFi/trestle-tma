@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { SubAccount } from '../hooks/useSubAccount';
 
 interface SubAccountCardProps {
@@ -7,11 +7,13 @@ interface SubAccountCardProps {
   onDelete: (address: string) => void;
 }
 
-const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDelete }) => {
-  const [isEditing, setIsEditing] = useState(false);
+const short = (addr: string) =>
+  addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '—';
 
+const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDelete }) => {
   const formatBalance = (balance: string) => {
     const num = parseFloat(balance);
+    if (!Number.isFinite(num)) return '0';
     if (num === 0) return '0';
     if (num < 0.001) return '<0.001';
     if (num < 1) return num.toFixed(3);
@@ -19,130 +21,65 @@ const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDe
   };
 
   return (
-    <div className="sub-account-card">
-      <div className="card-header">
-        <div className="account-info">
-          <div className="account-address">
-            {account.address.slice(0, 6)}...{account.address.slice(-4)}
-          </div>
-          <div className="status-indicator" style={{ backgroundColor: account.isActive ? '#10b981' : '#ef4444' }} />
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${account.isActive ? 'bg-emerald-500' : 'bg-red-400'}`}
+          />
+          <span className="font-mono text-xs text-gray-700 truncate">
+            {short(account.address)}
+          </span>
+          {!account.isActive && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-500">
+              Inactive
+            </span>
+          )}
         </div>
-        <div className="card-actions">
+        <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={() => setIsEditing(!isEditing)}
-            className="action-button edit"
+            onClick={() =>
+              onUpdate(account.address, { isActive: !account.isActive })
+            }
+            className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 transition"
           >
-            Edit
+            {account.isActive ? 'Pause' : 'Resume'}
           </button>
           <button
             onClick={() => onDelete(account.address)}
-            className="action-button delete"
+            className="text-[11px] px-2 py-1 rounded bg-red-50 text-red-700 hover:bg-red-100 transition"
           >
             Delete
           </button>
         </div>
       </div>
 
-      <div className="card-content">
-        <div className="detail-row">
-          <span className="label">Main Vault:</span>
-          <span className="value">{account.mainVault.slice(0, 6)}...{account.mainVault.slice(-4)}</span>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-500">Main Vault</dt>
+          <dd className="font-mono text-gray-700 truncate">{short(account.mainVault)}</dd>
         </div>
-        <div className="detail-row">
-          <span className="label">Threshold:</span>
-          <span className="value">{formatBalance(account.threshold)} ETH</span>
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-500">Threshold</dt>
+          <dd className="text-gray-700 font-medium">{formatBalance(account.threshold)} ETH</dd>
         </div>
-        <div className="detail-row">
-          <span className="label">Target:</span>
-          <span className="value">{account.target} ETH</span>
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-500">Target</dt>
+          <dd className="text-gray-700 font-medium">{formatBalance(account.target)} ETH</dd>
         </div>
-        <div className="detail-row">
-          <span className="label">Cooldown:</span>
-          <span className="value">{account.cooldown}s</span>
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-500">Cooldown</dt>
+          <dd className="text-gray-700 font-medium">{account.cooldown}s</dd>
         </div>
-        <div className="detail-row">
-          <span className="label">Max Daily:</span>
-          <span className="value">{account.maxDaily}</span>
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-500">Max Daily</dt>
+          <dd className="text-gray-700 font-medium">{account.maxDaily}</dd>
         </div>
-      </div>
-      <style>{`
-        .sub-account-card {
-          background: white;
-          border-radius: 8px;
-          padding: 16px;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          transition: transform 0.2s;
-        }
-        .sub-account-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-        }
-        .card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 16px;
-        }
-        .account-info {
-          flex: 1;
-        }
-        .account-address {
-          font-family: 'Monaco', monospace;
-          font-size: 14px;
-          color: #333;
-          margin-bottom: 8px;
-        }
-        .status-indicator {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          display: inline-block;
-        }
-        .card-actions {
-          display: flex;
-          gap: 8px;
-        }
-        .action-button {
-          padding: 4px 8px;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 12px;
-          transition: background-color 0.2s;
-        }
-        .action-button.edit {
-          background: #e0f2fe;
-          color: #0369a1;
-        }
-        .action-button.edit:hover {
-          background: #bae6fd;
-        }
-        .action-button.delete {
-          background: #fee2e2;
-          color: #991b1b;
-        }
-        .action-button.delete:hover {
-          background: #fca5a5;
-        }
-        .card-content {
-          margin-top: 16px;
-        }
-        .detail-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 8px;
-        }
-        .detail-row .label {
-          font-size: 12px;
-          color: #666;
-        }
-        .detail-row .value {
-          font-size: 12px;
-          font-weight: 600;
-          color: #333;
-        }
-      `}</style>
+        <div className="flex justify-between gap-2">
+          <dt className="text-gray-500">Spent Today</dt>
+          <dd className="text-gray-700 font-medium">{account.totalSpentToday}</dd>
+        </div>
+      </dl>
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { api } from '../../../lib/api';
+import { pluginApi } from '../../../lib/plugin';
 
 export interface SubAccount {
   address: string;
@@ -22,37 +22,69 @@ export interface SubAccountData {
   maxDaily?: number;
 }
 
+// The worker stores `address` as the primary key — it is the sub-account owner
+// address, supplied by the caller when creating a sub-account.
+export interface CreateSubAccountData extends SubAccountData {
+  address: string;
+}
+
+// Normalise a worker row (snake_case or camelCase) into the camelCase shape
+// the UI consumes. The worker may return either depending on the route.
+function normalise(row: any): SubAccount {
+  return {
+    address: row.address ?? row.user_address,
+    mainVault: row.mainVault ?? row.main_vault_ref,
+    threshold: String(row.threshold ?? "0"),
+    target: String(row.target ?? "0"),
+    cooldown: Number(row.cooldown ?? 0),
+    maxDaily: Number(row.maxDaily ?? row.max_daily ?? 0),
+    isActive: Boolean(row.isActive ?? row.is_active),
+    createdAt: Number(row.createdAt ?? row.created_at ?? 0),
+    sequence: Number(row.sequence ?? 0),
+    totalSpentToday: Number(row.totalSpentToday ?? row.total_spent_today ?? 0),
+  };
+}
+
 export const useSubAccount = () => {
   const [subAccounts, setSubAccounts] = useState<SubAccount[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSubAccounts = useCallback(async () => {
+  const fetchSubAccounts = useCallback(async (): Promise<SubAccount[]> => {
     try {
       setIsLoading(true);
       setError(null);
-      const data = await api<SubAccount[]>('/api/plugins/set-forget/subaccounts');
+      const response = await pluginApi<any>('/api/plugins/set-forget/subaccounts');
+      // Worker returns { subaccounts: [...] } — normalise
+      const raw: any[] = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.subaccounts)
+          ? response.subaccounts
+          : [];
+      const data = raw.map(normalise);
       setSubAccounts(data);
       return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch sub-accounts';
       setError(message);
-      throw err;
+      setSubAccounts([]);
+      return [];
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  const createSubAccount = useCallback(async (data: SubAccountData) => {
+  const createSubAccount = useCallback(async (data: CreateSubAccountData) => {
     try {
       setIsLoading(true);
       setError(null);
-      const response = await api<SubAccount>('/api/plugins/set-forget/subaccounts', {
+      const response = await pluginApi<any>('/api/plugins/set-forget/subaccounts', {
         method: 'POST',
         body: JSON.stringify(data),
       });
-      setSubAccounts(prev => [...prev, response]);
-      return response;
+      const created = normalise(response);
+      setSubAccounts(prev => [...prev, created]);
+      return created;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create sub-account';
       setError(message);
@@ -66,14 +98,15 @@ export const useSubAccount = () => {
     try {
       setIsLoading(true);
       setError(null);
-      const response = await api<SubAccount>(`/api/plugins/set-forget/subaccounts/${address}`, {
+      const response = await pluginApi<any>(`/api/plugins/set-forget/subaccounts/${address}`, {
         method: 'PUT',
         body: JSON.stringify(updates),
       });
-      setSubAccounts(prev => 
-        prev.map(account => account.address === address ? response : account)
+      const updated = normalise(response);
+      setSubAccounts(prev =>
+        prev.map(account => account.address === address ? { ...account, ...updated } : account)
       );
-      return response;
+      return updated;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update sub-account';
       setError(message);
@@ -87,7 +120,7 @@ export const useSubAccount = () => {
     try {
       setIsLoading(true);
       setError(null);
-      await api(`/api/plugins/set-forget/subaccounts/${address}`, {
+      await pluginApi(`/api/plugins/set-forget/subaccounts/${address}`, {
         method: 'DELETE',
       });
       setSubAccounts(prev => prev.filter(account => account.address !== address));
@@ -104,8 +137,8 @@ export const useSubAccount = () => {
     try {
       setIsLoading(true);
       setError(null);
-      const response = await api<SubAccount>(`/api/plugins/set-forget/subaccounts/${address}`);
-      return response;
+      const response = await pluginApi<any>(`/api/plugins/set-forget/subaccounts/${address}`);
+      return normalise(response);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch sub-account';
       setError(message);

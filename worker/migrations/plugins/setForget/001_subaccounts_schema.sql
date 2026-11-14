@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS reactive_subscriptions (
     is_active BOOLEAN DEFAULT 1,
     last_check INTEGER,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    FOREIGN KEY sub_account_address REFERENCES sub_accounts(user_address)
+    FOREIGN KEY (sub_account_address) REFERENCES sub_accounts(user_address)
 );
 
 -- Top-up requests table for tracking reactive callbacks
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS topup_requests (
     callback_triggered_at INTEGER,
     expires_at INTEGER NOT NULL,
     callback_data TEXT,
-    FOREIGN KEY sub_account_address REFERENCES sub_accounts(user_address)
+    FOREIGN KEY (sub_account_address) REFERENCES sub_accounts(user_address)
 );
 
 -- Sub-account events table for audit logging
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS sub_account_events (
     target_top_up TEXT,
     timestamp INTEGER NOT NULL,
     details TEXT,
-    FOREIGN KEY sub_account_address REFERENCES sub_accounts(user_address)
+    FOREIGN KEY (sub_account_address) REFERENCES sub_accounts(user_address)
 );
 
 -- Reactive callback logs table for tracking subscription callbacks
@@ -59,5 +59,5 @@ CREATE TABLE IF NOT EXISTS reactive_callback_logs (
     callback_sent_at INTEGER NOT NULL,
     callback_response TEXT,
     callback_status TEXT DEFAULT 'pending',
-    FOREIGN KEY subscription_id REFERENCES reactive_subscriptions(id)
+    FOREIGN KEY (subscription_id) REFERENCES reactive_subscriptions(id)
 );

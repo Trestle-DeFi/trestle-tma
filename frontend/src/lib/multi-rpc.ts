@@ -41,6 +41,15 @@ const RPCS: Record<number, RpcConfig[]> = {
     { url: "https://sepolia-rollup.arbitrum.io/rpc", label: "Official Arb Sepolia", weight: 2 },
     { url: "https://arbitrum-sepolia-rpc.publicnode.com", label: "PublicNode Arb Sepolia", weight: 1 },
   ],
+  // Unichain Sepolia (Set & Forget sub-account chain)
+  1301: [
+    { url: "https://sepolia.unichain.org", label: "Official Unichain Sepolia", weight: 2 },
+    { url: "https://unichain-sepolia-rpc.publicnode.com", label: "PublicNode Unichain Sepolia", weight: 1 },
+  ],
+  // Lasna Testnet (Reactive Network — Set & Forget guard chain)
+  5318007: [
+    { url: "https://lasna-rpc.rnk.dev/", label: "Reactive Lasna RPC", weight: 2 },
+  ],
 };
 
 function buildBlockscoutRpc(chainId: number): RpcConfig | null {
