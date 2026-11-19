@@ -12,6 +12,7 @@ export interface SubAccount {
   createdAt: number;
   sequence: number;
   totalSpentToday: number;
+  updatedAt: number;
 }
 
 export interface SubAccountData {
@@ -20,12 +21,18 @@ export interface SubAccountData {
   target: string;
   cooldown?: number;
   maxDaily?: number;
+  // Per-user configuration can be added by extending this interface
+  userSpecificSettings?: Record<string, any>;
 }
 
 // The worker stores `address` as the primary key — it is the sub-account owner
 // address, supplied by the caller when creating a sub-account.
 export interface CreateSubAccountData extends SubAccountData {
   address: string;
+  // User's wallet address can be used to resolve per-user settings from worker config
+  walletAddress?: string;
+  // Indicates whether to apply environment-variable overrides for this user
+  useEnvironmentOverrides?: boolean;
 }
 
 // Normalise a worker row (snake_case or camelCase) into the camelCase shape
@@ -42,6 +49,7 @@ function normalise(row: any): SubAccount {
     createdAt: Number(row.createdAt ?? row.created_at ?? 0),
     sequence: Number(row.sequence ?? 0),
     totalSpentToday: Number(row.totalSpentToday ?? row.total_spent_today ?? 0),
+    updatedAt: Number(row.updatedAt ?? row.updated_at ?? 0),
   };
 }
 
@@ -87,6 +95,40 @@ export const useSubAccount = () => {
       return created;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create sub-account';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // New function: Create sub-account with per-user configuration
+  const createSubAccountWithPerUserConfig = useCallback(async (
+    userAddress: string,
+    configData: SubAccountData,
+    options?: {
+      useEnvironmentOverrides?: boolean;
+      walletAddress?: string;
+    }
+  ) => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const requestBody = {
+        ...configData,
+        address: userAddress,
+        walletAddress: options?.walletAddress || userAddress,
+        useEnvironmentOverrides: options?.useEnvironmentOverrides ?? true,
+      };
+      const response = await pluginApi<any>('/api/plugins/set-forget/subaccounts', {
+        method: 'POST',
+        body: JSON.stringify(requestBody),
+      });
+      const created = normalise(response);
+      setSubAccounts(prev => [...prev, created]);
+      return created;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create sub-account with per-user config';
       setError(message);
       throw err;
     } finally {
@@ -154,6 +196,7 @@ export const useSubAccount = () => {
     error,
     fetchSubAccounts,
     createSubAccount,
+    createSubAccountWithPerUserConfig,
     updateSubAccount,
     deleteSubAccount,
     getSubAccount,

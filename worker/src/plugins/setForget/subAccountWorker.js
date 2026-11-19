@@ -182,3 +182,86 @@ export async function emitLowBalanceEvent(db, subAccountAddress, currentBalance,
     ).run()
   );
 }
+
+// User preferences management
+export interface UserPreferences {
+  userAddress: string;
+  autoTopupEnabled: boolean;
+  notificationsEnabled: boolean;
+  riskLevel: 'low' | 'medium' | 'high';
+  gasOptimization: boolean;
+  lastUpdated: number;
+}
+
+export async function getUserPreferences(db, userAddress: string): Promise<UserPreferences | null> {
+  return withPluginSchema(db, async () => {
+    const row = await db.prepare(
+      "SELECT * FROM user_preferences WHERE user_address = ?"
+    ).bind(userAddress).first();
+    
+    if (!row) return null;
+    
+    return {
+      userAddress: row.user_address,
+      autoTopupEnabled: Boolean(row.auto_topup_enabled),
+      notificationsEnabled: Boolean(row.notifications_enabled),
+      riskLevel: row.risk_level as 'low' | 'medium' | 'high',
+      gasOptimization: Boolean(row.gas_optimization),
+      lastUpdated: Number(row.last_updated),
+    };
+  });
+}
+
+export async function saveUserPreferences(db, preferences: UserPreferences): Promise<UserPreferences> {
+  return withPluginSchema(db, async () => {
+    const now = Math.floor(Date.now() / 1000);
+    
+    await db.prepare(
+      "INSERT OR REPLACE INTO user_preferences (user_address, auto_topup_enabled, notifications_enabled, risk_level, gas_optimization, last_updated) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(
+      preferences.userAddress,
+      preferences.autoTopupEnabled ? 1 : 0,
+      preferences.notificationsEnabled ? 1 : 0,
+      preferences.riskLevel,
+      preferences.gasOptimization ? 1 : 0,
+      now
+    ).run();
+    
+    return { ...preferences, lastUpdated: now };
+  });
+}
+
+export async function getUserConfigurationHistory(db, userAddress: string, limit: number = 50): Promise<any[]> {
+  return withPluginSchema(db, async () => {
+    const { results } = await db.prepare(
+      "SELECT * FROM configuration_history WHERE user_address = ? ORDER BY timestamp DESC LIMIT ?"
+    ).bind(userAddress, limit).all();
+    
+    return (results || []).map(row => ({
+      id: row.id,
+      userAddress: row.user_address,
+      settingKey: row.setting_key,
+      oldValue: row.old_value,
+      newValue: row.new_value,
+      timestamp: Number(row.timestamp),
+      changedBy: row.changed_by,
+    }));
+  });
+}
+
+export async function logConfigurationChange(db, userAddress: string, settingKey: string, oldValue: any, newValue: any, changedBy: string = 'user'): Promise<void> {
+  return withPluginSchema(db, async () => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    
+    await db.prepare(
+      "INSERT INTO configuration_history (user_address, setting_key, old_value, new_value, timestamp, changed_by) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(
+      userAddress,
+      settingKey,
+      typeof oldValue === 'object' ? JSON.stringify(oldValue) : String(oldValue),
+      typeof newValue === 'object' ? JSON.stringify(newValue) : String(newValue),
+      timestamp,
+      changedBy
+    ).run();
+  });
+}

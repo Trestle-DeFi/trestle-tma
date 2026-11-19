@@ -1,17 +1,19 @@
 {
   "name": "setForget-plugin",
   "version": "1.0.0",
-  "description": "Set & Forget auto-topup plugin for TMA",
+  "description": "Set & Forget auto-topup plugin with per-user configuration management",
   "author": "Trestle DeFi",
   "license": "MIT",
-  "tags": ["automation", "gas-management", "reactive"],
+  "tags": ["automation", "gas-management", "reactive", "configuration"],
   "dependencies": ["wallet-connect", "contracts"],
-  "permissions": ["read:subaccounts", "write:subaccounts", "callback"],
+  "permissions": ["read:subaccounts", "write:subaccounts", "callback", "read:preferences", "write:preferences"],
   "routes": [
     "/api/plugins/set-forget/subaccounts",
     "/api/plugins/set-forget/reactive/subscription",
     "/api/plugins/set-forget/reactive/status",
-    "/api/plugins/set-forget/reactive/callback"
+    "/api/plugins/set-forget/reactive/callback",
+    "/api/plugins/set-forget/configuration/preferences",
+    "/api/plugins/set-forget/configuration/history"
   ],
   "networkConfig": {
     "baseSepolia": {
@@ -48,5 +50,28 @@
   },
   "crossChainFlow": "Unichain Sepolia (SubAccount) -> Lasna Testnet (ReactiveGuard) -> Base Sepolia (MainVault)",
   "hackathon": "Reactive Omni Buildathon",
-  "version": "37"
+  "version": "37",
+  "configuration": {
+    "features": [
+      "per-user-threshold-management",
+      "auto-topup-configuration",
+      "risk-level-settings",
+      "gas-optimization",
+      "notification-preferences",
+      "configuration-history",
+      "backup-and-restore"
+    ],
+    "userPreferences": {
+      "autoTopupEnabled": true,
+      "notificationsEnabled": true,
+      "riskLevel": "medium",
+      "gasOptimization": true
+    },
+    "subAccountSettings": {
+      "defaultThreshold": "0.01",
+      "defaultTarget": "0.05",
+      "defaultCooldown": 300,
+      "defaultMaxDaily": 10
+    }
+  }
 }

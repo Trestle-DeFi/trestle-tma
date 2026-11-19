@@ -1,126 +1,141 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.37;
 
-import "forge-std/Test.sol";
-import "../src/TrestleMainVault.sol";
+import {Test} from "forge-std/Test.sol";
+import {TrestleMainVault} from "../src/TrestleMainVault.sol";
+import {IPayable} from "@reactive/reactive-lib-omni/src/interfaces/IPayable.sol";
+
+contract MockTopupBridge {
+    bytes32 public requestId;
+    address public destination;
+    uint256 public amount;
+    uint256 public valueReceived;
+
+    function sendTopup(bytes32 requestId_, address destination_, uint256 amount_) external payable returns (bytes32) {
+        requestId = requestId_;
+        destination = destination_;
+        amount = amount_;
+        valueReceived = msg.value;
+        return keccak256(abi.encode(requestId_, destination_, amount_));
+    }
+}
 
 contract TrestleMainVaultTest is Test {
-    TrestleMainVault public mainVault;
+    TrestleMainVault public vault;
+    MockTopupBridge public bridge;
     address public owner = vm.addr(1);
-    address public addr1 = vm.addr(2); // reactive contract
-    address public addr2 = vm.addr(3); // unauthorized
-    
+    address payable public callbackProxy = payable(vm.addr(2));
+    address public reactiveSender = vm.addr(3);
+    address public unauthorized = vm.addr(4);
+    address public destination = vm.addr(5);
+
     function setUp() public {
         vm.startPrank(owner);
-        mainVault = new TrestleMainVault();
+        bridge = new MockTopupBridge();
+        vault = new TrestleMainVault(IPayable(callbackProxy), reactiveSender);
+        vault.setTopupBridge(address(bridge));
         vm.stopPrank();
+        vm.deal(address(vault), 1e18);
     }
-    
-    function testDeployment() public {
-        assertEq(mainVault.owner(), owner);
-        assertEq(mainVault.reactiveContract(), owner); // owner is initial reactive contract
+
+    function _release(bytes32 requestId, uint256 amount, uint256 timestamp, uint64 sequence) internal {
+        vm.prank(callbackProxy);
+        vault.releaseTopup(reactiveSender, requestId, destination, amount, timestamp, sequence);
     }
-    
-    function testRequestTopUp() public {
-        vm.startPrank(owner);
-        address subAccount = vm.addr(4);
-        uint256 amount = 1e16; // 0.01 ETH
-        
-        mainVault.requestTopUp(subAccount, amount);
-        vm.stopPrank();
+
+    function testDeploymentAuthenticatesProxyAndReactiveSender() public view {
+        assertEq(vault.owner(), owner);
+        assertEq(address(vault._SERVICE_PROVIDER()), callbackProxy);
+        assertEq(vault._CALLBACK_SENDER(), reactiveSender);
     }
-    
-    function testRequestTopUpRevertsTooSmall() public {
-        vm.startPrank(owner);
-        address subAccount = vm.addr(4);
-        uint256 amount = 1e14; // below 1e15 minimum
-        
+
+    function testAuthorizedCallbackBridgesTopup() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        _release(requestId, 1e16, block.timestamp, sequence);
+
+        (bool settled, bool expired, uint256 amount) = vault.getRequestStatus(requestId);
+        assertTrue(settled);
+        assertFalse(expired);
+        assertEq(amount, 1e16);
+        assertEq(bridge.requestId(), requestId);
+        assertEq(bridge.destination(), destination);
+        assertEq(bridge.amount(), 1e16);
+        assertEq(bridge.valueReceived(), 1.01e16);
+    }
+
+    function testRejectsCallerOtherThanCallbackProxy() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        vault.releaseTopup(reactiveSender, requestId, destination, 1e16, block.timestamp, sequence);
+    }
+
+    function testRejectsDifferentReactiveSender() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        vm.prank(callbackProxy);
+        vm.expectRevert();
+        vault.releaseTopup(unauthorized, requestId, destination, 1e16, block.timestamp, sequence);
+    }
+
+    function testRejectsDuplicateCallback() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        _release(requestId, 1e16, block.timestamp, sequence);
+        vm.prank(callbackProxy);
+        vm.expectRevert("Request settled");
+        vault.releaseTopup(reactiveSender, requestId, destination, 1e16, block.timestamp, sequence);
+    }
+
+    function testRejectsExpiredCallback() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        vm.warp(3602);
+        vm.prank(callbackProxy);
+        vm.expectRevert("Request expired");
+        vault.releaseTopup(reactiveSender, requestId, destination, 1e16, 1, sequence);
+    }
+
+    function testRejectsTopupBelowMinimum() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        vm.prank(callbackProxy);
         vm.expectRevert("Amount too small");
-        mainVault.requestTopUp(subAccount, amount);
-        vm.stopPrank();
+        vault.releaseTopup(reactiveSender, requestId, destination, 1e14, block.timestamp, sequence);
     }
-    
-    function testReleaseTopupByReactiveContract() public {
-        vm.startPrank(owner);
-        address subAccount = vm.addr(4);
-        uint256 amount = 1e16;
-        
-        // Fund the vault
-        vm.deal(address(mainVault), 1e17);
-        
-        // Request top-up
-        mainVault.requestTopUp(subAccount, amount);
-        
-        // Get the requestId
-        bytes32[] memory requests = mainVault.getSubAccountRequests(subAccount);
-        bytes32 requestId = requests[0];
-        
-        // Set reactive contract to addr1
-        mainVault.setReactiveContract(addr1);
-        
-        // Release top-up via reactive contract
-        vm.startPrank(addr1);
-        mainVault.releaseTopup(requestId, subAccount, amount);
-        
-        // Verify settled
-        (bool settled, bool expired, uint256 reqAmount) = mainVault.getRequestStatus(requestId);
-        assertEq(settled, true);
-        assertEq(expired, false);
-        assertEq(reqAmount, amount);
-        
-        vm.stopPrank();
-        vm.stopPrank();
+
+    function testRejectsNonCanonicalRequestId() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256("non-canonical");
+        vm.prank(callbackProxy);
+        vm.expectRevert("Invalid request ID");
+        vault.releaseTopup(reactiveSender, requestId, destination, 1e16, block.timestamp, sequence);
     }
-    
-    function testReleaseTopupRevertsUnauthorized() public {
-        vm.startPrank(owner);
-        address subAccount = vm.addr(4);
-        uint256 amount = 1e16;
-        
-        mainVault.requestTopUp(subAccount, amount);
-        
-        bytes32[] memory requests = mainVault.getSubAccountRequests(subAccount);
-        bytes32 requestId = requests[0];
-        
-        // Unauthorized caller tries to release
-        vm.startPrank(addr2);
-        vm.expectRevert("Not reactive contract");
-        mainVault.releaseTopup(requestId, subAccount, amount);
-        
-        vm.stopPrank();
-        vm.stopPrank();
+
+    function testRejectsMismatchForExistingRequestWithoutOverwriting() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        vm.prank(owner);
+        vault.requestTopUp(destination, sequence, 1e16);
+
+        vm.prank(callbackProxy);
+        vm.expectRevert("Amount mismatch");
+        vault.releaseTopup(reactiveSender, requestId, destination, 2e16, block.timestamp, sequence);
+
+        (bool settled, bool expired, uint256 amount) = vault.getRequestStatus(requestId);
+        assertFalse(settled);
+        assertFalse(expired);
+        assertEq(amount, 1e16);
     }
-    
-    function testReleaseTopupRevertsExpired() public {
-        vm.startPrank(owner);
-        address subAccount = vm.addr(4);
-        uint256 amount = 1e16;
-        
-        vm.deal(address(mainVault), 1e17);
-        
-        mainVault.requestTopUp(subAccount, amount);
-        
-        bytes32[] memory requests = mainVault.getSubAccountRequests(subAccount);
-        bytes32 requestId = requests[0];
-        
-        mainVault.setReactiveContract(addr1);
-        
-        // Fast forward past expiry (3600 seconds)
-        vm.warp(block.timestamp + 3601);
-        
-        vm.startPrank(addr1);
-        mainVault.releaseTopup(requestId, subAccount, amount);
-        
-        vm.stopPrank();
-        vm.stopPrank();
-    }
-    
-    function testSetReactiveContract() public {
-        vm.startPrank(owner);
-        assertEq(mainVault.reactiveContract(), owner);
-        
-        mainVault.setReactiveContract(addr1);
-        assertEq(mainVault.reactiveContract(), addr1);
-        vm.stopPrank();
+
+    function testRejectsInsufficientVaultBalance() public {
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        vm.deal(address(vault), 1e15);
+        vm.prank(callbackProxy);
+        vm.expectRevert("Insufficient vault balance");
+        vault.releaseTopup(reactiveSender, requestId, destination, 1e16, block.timestamp, sequence);
     }
 }

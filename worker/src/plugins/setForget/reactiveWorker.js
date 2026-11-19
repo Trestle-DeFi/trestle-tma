@@ -14,10 +14,31 @@ export const LOW_BALANCE_TOPIC = keccak256(
 const GUARD_ABI = [
   {
     type: "function",
-    name: "subscriptionCount",
+    name: "ORIGIN_CHAIN_ID",
     stateMutability: "view",
     inputs: [],
     outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "ORIGIN_CONTRACT",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
+    name: "LOW_BALANCE_TOPIC",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "callbackRecipient",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
   },
   {
     type: "function",
@@ -29,15 +50,13 @@ const GUARD_ABI = [
         type: "tuple",
         components: [
           { name: "subAccount", type: "address" },
-          { name: "mainVault", type: "address" },
-          { name: "callbackUrl", type: "string" },
-          { name: "isActive", type: "bool" },
-          { name: "createdAt", type: "uint256" },
-          { name: "lastEventHash", type: "bytes32" },
-          { name: "lastCooldownBlock", type: "uint256" },
           { name: "maxDailyRefills", type: "uint64" },
           { name: "dailyRefillCount", type: "uint64" },
           { name: "lastRefillDay", type: "uint256" },
+          { name: "lastCooldownAt", type: "uint256" },
+          { name: "lastEventHash", type: "bytes32" },
+          { name: "isActive", type: "bool" },
+          { name: "createdAt", type: "uint256" },
         ],
       },
     ],
@@ -73,12 +92,10 @@ export async function readOnChainSubscription(env, subAccountAddress) {
 
   return {
     subAccount: status.subAccount,
-    mainVault: status.mainVault,
-    callbackUrl: status.callbackUrl,
     isActive: status.isActive,
     createdAt: Number(status.createdAt),
     lastEventHash: status.lastEventHash,
-    lastCooldownBlock: Number(status.lastCooldownBlock),
+    lastCooldownAt: Number(status.lastCooldownAt),
     maxDailyRefills: Number(status.maxDailyRefills),
     dailyRefillCount: Number(status.dailyRefillCount),
     lastRefillDay: Number(status.lastRefillDay),
@@ -86,17 +103,23 @@ export async function readOnChainSubscription(env, subAccountAddress) {
 }
 
 /**
- * Read the live on-chain subscription count from the ReactiveGuard on Lasna.
+ * Read the live Reactive Network configuration from the guard on Lasna.
  */
-export async function readOnChainSubscriptionCount(env) {
+export async function readOnChainGuardConfig(env) {
   const { guardAddress } = guardConfig(env);
   const client = lasnaClient(env);
-  const count = await client.readContract({
-    address: guardAddress,
-    abi: GUARD_ABI,
-    functionName: "subscriptionCount",
-  });
-  return Number(count);
+  const [originChainId, originContract, lowBalanceTopic, recipient] = await Promise.all([
+    client.readContract({ address: guardAddress, abi: GUARD_ABI, functionName: "ORIGIN_CHAIN_ID" }),
+    client.readContract({ address: guardAddress, abi: GUARD_ABI, functionName: "ORIGIN_CONTRACT" }),
+    client.readContract({ address: guardAddress, abi: GUARD_ABI, functionName: "LOW_BALANCE_TOPIC" }),
+    client.readContract({ address: guardAddress, abi: GUARD_ABI, functionName: "callbackRecipient" }),
+  ]);
+  return {
+    originChainId: Number(originChainId),
+    originContract,
+    lowBalanceTopic: String(lowBalanceTopic),
+    callbackRecipient: recipient,
+  };
 }
 
 function mapSubscription(row) {
@@ -149,8 +172,8 @@ export async function listSubscriptions(db) {
  * Build the aggregate status the TMA plugin renders.
  *
  * `isConnected` reflects real reachability of the Lasna RPC — it is never faked.
- * `subscriptionCount` is the on-chain guard count; `pendingCount` and
- * `lastTrigger` come from the worker's own D1 state.
+ * `subscriptionCount` is the number of active on-chain subscriptions mirrored
+ * in D1; `pendingCount` and `lastTrigger` come from the worker's own D1 state.
  */
 export async function getReactiveStatus(db, env = {}) {
   const { guardAddress } = guardConfig(env);
@@ -159,9 +182,10 @@ export async function getReactiveStatus(db, env = {}) {
   let isConnected = false;
   let lastError;
   let subscriptions = [];
+  let guardConfigState = null;
 
   try {
-    onChainSubscriptionCount = await readOnChainSubscriptionCount(env);
+    guardConfigState = await readOnChainGuardConfig(env);
     isConnected = true;
   } catch (e) {
     lastError = `Lasna RPC unreachable: ${e.message}`;
@@ -178,11 +202,11 @@ export async function getReactiveStatus(db, env = {}) {
           ...sub,
           isActive: chain.isActive,
           onChain: {
-            mainVault: chain.mainVault,
-            callbackUrl: chain.callbackUrl,
             maxDailyRefills: chain.maxDailyRefills,
             dailyRefillCount: chain.dailyRefillCount,
             lastRefillDay: chain.lastRefillDay,
+            lastCooldownAt: chain.lastCooldownAt,
+            lastEventHash: chain.lastEventHash,
             createdAt: chain.createdAt,
           },
         };
@@ -191,6 +215,7 @@ export async function getReactiveStatus(db, env = {}) {
       }
     })
   );
+  onChainSubscriptionCount = subscriptions.filter((sub) => sub.isActive).length;
 
   const pendingRow = await db.prepare(
     "SELECT COUNT(*) AS c FROM topup_requests WHERE status = 'pending'"
@@ -210,6 +235,7 @@ export async function getReactiveStatus(db, env = {}) {
     isConnected,
     guardAddress,
     subscriptions,
+    ...(guardConfigState ? { guardConfig: guardConfigState } : {}),
     ...(lastError ? { lastError } : {}),
   };
 }

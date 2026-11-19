@@ -1,70 +1,38 @@
-const hre = require("hardhat");
-const fs = require("fs");
+const { spawnSync } = require("child_process");
 
-async function main() {
-  console.log("=== Deploying All Set & Forget Contracts ===\n");
+const steps = [
+  ["Unichain Sepolia sub-account", "unichainSepolia", "scripts/deploy-subaccount.js"],
+  ["Lasna reactive guard", "lasnaTestnet", "scripts/deploy-reactiveguard.js"],
+  ["Base Sepolia main vault", "baseSepolia", "scripts/deploy-mainvault.js"],
+  ["Base Sepolia CCIP bridge", "baseSepolia", "scripts/deploy-ccipbridge.js"],
+  // The receiver constructor path requires an existing bridgeCreditAccount, so
+  // the sub-account must be created (against the newly deployed vault) first.
+  ["Unichain Sepolia sub-account setup", "unichainSepolia", "scripts/setup-unichain.js"],
+  ["Unichain Sepolia CCIP receiver", "unichainSepolia", "scripts/deploy-ccipreceiver.js"],
+  ["Base Sepolia setup", "baseSepolia", "scripts/setup-baseSepolia.js"],
+  ["Lasna setup", "lasnaTestnet", "scripts/setup-lasna.js"],
+];
 
-  const deployments = {};
-
-  // 1. Deploy TrestleSubAccount to Unichain Sepolia
-  console.log("[1/3] Deploying TrestleSubAccount to Unichain Sepolia...");
-  const [deployer] = await hre.ethers.getSigners();
-  console.log("Deployer:", deployer.address);
-
-  const TrestleSubAccount = await hre.ethers.getContractFactory("TrestleSubAccount");
-  const subAccount = await TrestleSubAccount.deploy();
-  await subAccount.waitForDeployment();
-  const subAccountAddr = await subAccount.getAddress();
-  deployments.unichainSepolia = {
-    contract: "TrestleSubAccount",
-    address: subAccountAddr,
-    txHash: subAccount.deploymentTransaction().hash
-  };
-  console.log("  ->", subAccountAddr, "\n");
-
-  // 2. Deploy TrestleMainVault to Base Sepolia
-  console.log("[2/3] Deploying TrestleMainVault to Base Sepolia...");
-  const TrestleMainVault = await hre.ethers.getContractFactory("TrestleMainVault");
-  const mainVault = await TrestleMainVault.deploy();
-  await mainVault.waitForDeployment();
-  const mainVaultAddr = await mainVault.getAddress();
-  deployments.baseSepolia = {
-    contract: "TrestleMainVault",
-    address: mainVaultAddr,
-    txHash: mainVault.deploymentTransaction().hash
-  };
-  console.log("  ->", mainVaultAddr, "\n");
-
-  // 3. Deploy TrestleReactiveGuard to Lasna Testnet
-  console.log("[3/3] Deploying TrestleReactiveGuard to Lasna Testnet...");
-  const TrestleReactiveGuard = await hre.ethers.getContractFactory("TrestleReactiveGuard");
-  const reactiveGuard = await TrestleReactiveGuard.deploy();
-  await reactiveGuard.waitForDeployment();
-  const reactiveGuardAddr = await reactiveGuard.getAddress();
-  deployments.lasnaTestnet = {
-    contract: "TrestleReactiveGuard",
-    address: reactiveGuardAddr,
-    txHash: reactiveGuard.deploymentTransaction().hash
-  };
-  console.log("  ->", reactiveGuardAddr, "\n");
-
-  // Save all deployments
-  fs.mkdirSync("./deployments", { recursive: true });
-  fs.writeFileSync("./deployments/all-deployments.json", JSON.stringify({
-    deployer: deployer.address,
-    timestamp: new Date().toISOString(),
-    deployments: deployments
-  }, null, 2));
-
-  console.log("=== Deployment Complete ===");
-  console.log("Summary:");
-  console.log("  Unichain Sepolia - TrestleSubAccount:", deployments.unichainSepolia.address);
-  console.log("  Base Sepolia - TrestleMainVault:", deployments.baseSepolia.address);
-  console.log("  Lasna Testnet - TrestleReactiveGuard:", deployments.lasnaTestnet.address);
-  console.log("\nDeployment info saved to deployments/all-deployments.json");
+function main() {
+  console.log("=== Deploying and Configuring All Set & Forget Contracts ===\n");
+  for (const [index, [label, network, script]] of steps.entries()) {
+    console.log(`[${index + 1}/${steps.length}] ${label}...`);
+    const result = spawnSync(
+      process.execPath,
+      [require.resolve("hardhat/internal/cli/cli"), "run", script, "--network", network],
+      { stdio: "inherit", env: process.env },
+    );
+    if (result.status !== 0) {
+      throw new Error(`${label} failed with exit code ${result.status}`);
+    }
+    console.log("");
+  }
+  console.log("=== Deployment and Configuration Complete ===");
 }
 
-main().catch((error) => {
+try {
+  main();
+} catch (error) {
   console.error(error);
   process.exitCode = 1;
-});
+}

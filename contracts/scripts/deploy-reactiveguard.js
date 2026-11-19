@@ -1,30 +1,55 @@
 const hre = require("hardhat");
 const fs = require("fs");
+const { ethers } = require("ethers");
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable ${name}`);
+  return value;
+}
 
 async function main() {
   console.log("=== Deploying TrestleReactiveGuard to Lasna Testnet ===");
   const [deployer] = await hre.ethers.getSigners();
+  const originChainId = process.env.ORIGIN_CHAIN_ID || "1301";
+  const originContract =
+    process.env.SUBACCOUNT_ADDRESS ||
+    JSON.parse(
+      fs.readFileSync("./deployments/unichainSepolia-TrestleSubAccount.json", "utf8"),
+    ).address;
+  const topic =
+    process.env.LOW_BALANCE_TOPIC ||
+    ethers.id("LowBalanceDetected(address,uint256,uint256,uint64)");
+
   console.log("Deployer:", deployer.address);
+  console.log("Origin chain ID:", originChainId);
+  console.log("Origin contract:", originContract);
+  console.log("Low-balance topic:", topic);
 
   const TrestleReactiveGuard = await hre.ethers.getContractFactory("TrestleReactiveGuard");
-  const reactiveGuard = await TrestleReactiveGuard.deploy();
+  const reactiveGuard = await TrestleReactiveGuard.deploy(originChainId, originContract, topic);
   await reactiveGuard.waitForDeployment();
   const address = await reactiveGuard.getAddress();
-  console.log("TrestleReactiveGuard deployed to:", address);
-  console.log("Network: Lasna Testnet (Chain ID: 5318007)");
-  console.log("Explorer: https://explorer.testnet.reactivenetwork.org");
 
   const deployment = {
     network: "lasnaTestnet",
     contract: "TrestleReactiveGuard",
-    address: address,
+    address,
     deployer: deployer.address,
+    originChainId: Number(originChainId),
+    originContract,
+    lowBalanceTopic: topic,
+    constructorArgs: [Number(originChainId), originContract, topic],
     timestamp: new Date().toISOString(),
-    txHash: reactiveGuard.deploymentTransaction().hash
+    txHash: reactiveGuard.deploymentTransaction().hash,
   };
 
   fs.mkdirSync("./deployments", { recursive: true });
-  fs.writeFileSync("./deployments/lasnaTestnet-TrestleReactiveGuard.json", JSON.stringify(deployment, null, 2));
+  fs.writeFileSync(
+    "./deployments/lasnaTestnet-TrestleReactiveGuard.json",
+    JSON.stringify(deployment, null, 2),
+  );
+  console.log("TrestleReactiveGuard deployed to:", address);
   console.log("Deployment info saved to deployments/lasnaTestnet-TrestleReactiveGuard.json");
 }
 

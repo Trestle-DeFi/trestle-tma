@@ -9,17 +9,13 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 contract TrestleSubAccount is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    event LowBalanceDetected(
-        address indexed subAccount,
-        uint256 currentBalance,
-        uint256 targetTopUp,
-        uint64 sequence
-    );
+    event LowBalanceDetected(address indexed subAccount, uint256 currentBalance, uint256 targetTopUp, uint64 sequence);
     event SubAccountCreated(address indexed subAccount, address mainVault);
     event SubAccountUpdated(address indexed subAccount, uint256 newThreshold);
     event SpendRequested(address indexed subAccount, uint256 amount, address indexed recipient);
     event TopUpReceived(address indexed subAccount, uint256 amount);
     event SubAccountDeactivated(address indexed subAccount);
+    event BridgeCreditorUpdated(address indexed bridgeCreditor);
 
     struct SubAccountConfig {
         address mainVault;
@@ -37,6 +33,8 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
     mapping(address => SubAccountConfig) public subAccounts;
     mapping(address => uint256) public virtualBalances;
     mapping(address => bool) public authorizedOperators;
+    address public bridgeCreditor;
+    address public bridgeCreditAccount;
 
     uint256 public constant MIN_THRESHOLD = 1e15;
     uint64 public constant COOLDOWN_PERIOD = 300;
@@ -78,13 +76,11 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
 
         virtualBalances[msg.sender] = _target;
         authorizedOperators[msg.sender] = true;
+        if (bridgeCreditAccount == address(0)) bridgeCreditAccount = msg.sender;
         emit SubAccountCreated(msg.sender, _mainVault);
     }
-    function spend(
-        address recipient,
-        uint256 amount,
-        address token
-    ) external onlyAuthorized nonReentrant {
+
+    function spend(address recipient, uint256 amount, address token) external onlyAuthorized nonReentrant {
         require(amount > 0, "Amount must be positive");
         address subAccount = msg.sender;
         SubAccountConfig storage config = subAccounts[subAccount];
@@ -100,26 +96,24 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
             require(IERC20(token).balanceOf(address(this)) >= amount, "Insufficient token balance");
             IERC20(token).safeTransfer(recipient, amount);
         }
-        uint256 currentBalance = token == address(0)
-            ? address(this).balance
-            : IERC20(token).balanceOf(address(this));
+        // The refill asset is the sub-account's native coin. The token argument
+        // identifies the fee/payment asset, but the balance being monitored is
+        // always native coin so the operational wallet can pay future fees.
+        uint256 currentBalance = address(this).balance;
         if (currentBalance < config.threshold) {
-            emit LowBalanceDetected(
-                subAccount,
-                currentBalance,
-                config.target - currentBalance,
-                config.sequence
-            );
+            // The indexed account must be the sub-account owner/operator, not
+            // address(this): the reactive guard keys its per-account
+            // subscription on this field and watches the contract address as
+            // the log origin.
+            emit LowBalanceDetected(subAccount, currentBalance, config.target, config.sequence);
         }
         emit SpendRequested(subAccount, amount, recipient);
     }
 
-    function updateConfig(
-        uint256 newThreshold,
-        uint256 newTarget,
-        uint64 newCooldown,
-        uint64 newMaxDaily
-    ) external onlyAuthorized {
+    function updateConfig(uint256 newThreshold, uint256 newTarget, uint64 newCooldown, uint64 newMaxDaily)
+        external
+        onlyAuthorized
+    {
         require(newThreshold >= MIN_THRESHOLD, "Threshold too low");
         require(newCooldown >= COOLDOWN_PERIOD, "Cooldown too short");
         require(newMaxDaily > 0 && newMaxDaily <= MAX_DAILY_LIMIT, "Invalid max daily limit");
@@ -140,6 +134,25 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
         config.lastTopUpTime = block.timestamp;
         virtualBalances[subAccount] += amount;
         emit TopUpReceived(subAccount, amount);
+    }
+
+    /// @notice Credits a native-coin top-up delivered by the configured
+    /// cross-chain receiver. The receiver must send exactly the credited
+    /// amount with the call.
+    function receiveTopUpFromBridge(uint256 amount) external payable {
+        require(msg.sender == bridgeCreditor && bridgeCreditor != address(0), "Not bridge");
+        require(amount > 0 && msg.value == amount, "Invalid top-up amount");
+        address account = bridgeCreditAccount;
+        require(account != address(0), "Bridge account not configured");
+        require(subAccounts[account].isActive, "Sub-account not active");
+        subAccounts[account].lastTopUpTime = block.timestamp;
+        virtualBalances[account] += amount;
+        emit TopUpReceived(account, amount);
+    }
+
+    function setBridgeCreditor(address creditor) external onlyOwner {
+        bridgeCreditor = creditor;
+        emit BridgeCreditorUpdated(creditor);
     }
 
     function emergencyDeactivate() external onlyOwner {

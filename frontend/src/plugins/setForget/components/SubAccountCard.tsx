@@ -25,6 +25,7 @@ const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDe
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span
+            data-testid="status-dot"
             className={`w-2 h-2 rounded-full shrink-0 ${account.isActive ? 'bg-emerald-500' : 'bg-red-400'}`}
           />
           <span className="font-mono text-xs text-gray-700 truncate">

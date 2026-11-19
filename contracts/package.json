@@ -1,14 +1,19 @@
 {
   "name": "trestle-setforget-contracts",
   "version": "1.0.0",
-  "description": "Set & Forget smart contracts for Reactive Omni Buildathon - Version 37",
+  "description": "Set & Forget smart contracts for Reactive Omni Buildathon - Version 37 - Enhanced with Per-User Configuration Support",
   "main": "index.js",
   "scripts": {
     "compile": "hardhat compile",
     "deploy:baseSepolia": "hardhat run scripts/deploy-mainvault.js --network baseSepolia",
     "deploy:unichainSepolia": "hardhat run scripts/deploy-subaccount.js --network unichainSepolia",
     "deploy:lasna": "hardhat run scripts/deploy-reactiveguard.js --network lasnaTestnet",
-    "deploy:all": "npm run deploy:unichainSepolia && npm run deploy:baseSepolia && npm run deploy:lasna",
+    "deploy:ccipBridge": "hardhat run scripts/deploy-ccipbridge.js --network baseSepolia",
+    "deploy:ccipReceiver": "hardhat run scripts/deploy-ccipreceiver.js --network unichainSepolia",
+    "setup:unichainSepolia": "hardhat run scripts/setup-unichain.js --network unichainSepolia",
+    "setup:baseSepolia": "hardhat run scripts/setup-baseSepolia.js --network baseSepolia",
+    "setup:lasna": "hardhat run scripts/setup-lasna.js --network lasnaTestnet",
+    "deploy:all": "hardhat run scripts/deploy-all.js",
     "test": "hardhat test",
     "verify:baseSepolia": "hardhat verify --network baseSepolia DEPLOYED_CONTRACT_ADDRESS",
     "verify:unichainSepolia": "hardhat verify --network unichainSepolia DEPLOYED_CONTRACT_ADDRESS",
@@ -21,6 +26,7 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.2",
+    "@reactive/reactive-lib-omni": "file:lib/reactive-lib-omni",
     "fp-ts": "^2.16.11",
     "io-ts": "^2.2.22"
   }

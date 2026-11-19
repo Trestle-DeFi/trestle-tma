@@ -1,8 +1,16 @@
 {
   "network": "lasnaTestnet",
   "contract": "TrestleReactiveGuard",
-  "address": "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88",
+  "address": "0x976c6D9F4544E0b2f471698AdaeF54777C6FA3D2",
   "deployer": "0x9280b24542a52cEE54a78dB65A497D8BeC4BAB94",
-  "timestamp": "2026-11-12T10:35:58.291Z",
-  "txHash": "0xad792fa42cfc767269fc203411e6fdd66e86251f819da57ff37f23a586bebbc4"
+  "originChainId": 1301,
+  "originContract": "0x1199e771BC3CB847FBd27362b65b74879E7D979D",
+  "lowBalanceTopic": "0x51ade1b66b4d8c165822344a89904b54817158763b47b9faacee15c7645199ec",
+  "constructorArgs": [
+    1301,
+    "0x1199e771BC3CB847FBd27362b65b74879E7D979D",
+    "0x51ade1b66b4d8c165822344a89904b54817158763b47b9faacee15c7645199ec"
+  ],
+  "timestamp": "2026-11-18T23:07:16.470Z",
+  "txHash": "0x6395359d1c2d33eb98800135fc61299ffc45f2c6bd06a48a801949bae48aba7c"
 }

@@ -11,7 +11,7 @@ async function main() {
   await subAccount.waitForDeployment();
   const address = await subAccount.getAddress();
   console.log("TrestleSubAccount deployed to:", address);
-  console.log("Network: Unichain Sepolia (Chain ID: 16699)");
+  console.log("Network: Unichain Sepolia (Chain ID: 1301)");
   console.log("Explorer: https://sepolia.uniscan.org");
 
   const deployment = {
@@ -19,6 +19,7 @@ async function main() {
     contract: "TrestleSubAccount",
     address: address,
     deployer: deployer.address,
+    constructorArgs: [],
     timestamp: new Date().toISOString(),
     txHash: subAccount.deploymentTransaction().hash
   };
