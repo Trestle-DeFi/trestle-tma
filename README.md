@@ -40,9 +40,11 @@ trestle-tma/
 │   │   ├── pages/     # Dashboard, Marketplace, Tasks, Bounty, Staking, Verify, Withdraw
 │   │   ├── hooks/     # useContracts, useAuth, useTelegram, useTelegramLink
 │   │   ├── lib/       # api, astra, vault, reward
-│   │   └── components/\
+│   │   └── components/
+│   └── public/avatars/
 ├── worker/            # Cloudflare Worker (vault.trestle.website)
-│   └── src/           # index.js, vault.js, log.js\n```
+    └── src/           # index.js, vault.js, log.js
+```
 
 ## Setup
 
@@ -93,7 +95,7 @@ Worker deploys require repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT
 - **X (Twitter)**: [Trestle DeFi](https://x.com/Trestle_0xArch)
 - **BlueSky**: [Trestle DeFi](https://bsky.app/profile/trestle-0xarch.bsky.social)
 - **Medium**: [Trestle DeFi](https://medium.com/@trestle_defi)
-- **Discord**: [Trestle DeFi](https://discord.gg/4dCC56JYGT)
+- **Discord**: [Trestle DeFi](https://discord.gg/4dCCvnJYGT)
 - **Telegram**: [trestleDeFi](https://t.me/trestleDeFi)
 - **Telegram App**: [trestlehub_bot](https://t.me/trestlehub_bot)
 - **Email**: contact@trestle.website
