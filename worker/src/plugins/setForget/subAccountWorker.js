@@ -184,16 +184,22 @@ export async function emitLowBalanceEvent(db, subAccountAddress, currentBalance,
 }
 
 // User preferences management
-export interface UserPreferences {
-  userAddress: string;
-  autoTopupEnabled: boolean;
-  notificationsEnabled: boolean;
-  riskLevel: 'low' | 'medium' | 'high';
-  gasOptimization: boolean;
-  lastUpdated: number;
-}
+/**
+ * @typedef {Object} UserPreferences
+ * @property {string} userAddress
+ * @property {boolean} autoTopupEnabled
+ * @property {boolean} notificationsEnabled
+ * @property {'low'|'medium'|'high'} riskLevel
+ * @property {boolean} gasOptimization
+ * @property {number} lastUpdated
+ */
 
-export async function getUserPreferences(db, userAddress: string): Promise<UserPreferences | null> {
+/**
+ * @param {any} db
+ * @param {string} userAddress
+ * @returns {Promise<UserPreferences|null>}
+ */
+export async function getUserPreferences(db, userAddress) {
   return withPluginSchema(db, async () => {
     const row = await db.prepare(
       "SELECT * FROM user_preferences WHERE user_address = ?"
@@ -205,14 +211,14 @@ export async function getUserPreferences(db, userAddress: string): Promise<UserP
       userAddress: row.user_address,
       autoTopupEnabled: Boolean(row.auto_topup_enabled),
       notificationsEnabled: Boolean(row.notifications_enabled),
-      riskLevel: row.risk_level as 'low' | 'medium' | 'high',
+      riskLevel: row.risk_level,
       gasOptimization: Boolean(row.gas_optimization),
       lastUpdated: Number(row.last_updated),
     };
   });
 }
 
-export async function saveUserPreferences(db, preferences: UserPreferences): Promise<UserPreferences> {
+export async function saveUserPreferences(db, preferences) {
   return withPluginSchema(db, async () => {
     const now = Math.floor(Date.now() / 1000);
     
@@ -231,7 +237,12 @@ export async function saveUserPreferences(db, preferences: UserPreferences): Pro
   });
 }
 
-export async function getUserConfigurationHistory(db, userAddress: string, limit: number = 50): Promise<any[]> {
+/**
+ * @param {any} db
+ * @param {string} userAddress
+ * @param {number} [limit]
+ */
+export async function getUserConfigurationHistory(db, userAddress, limit = 50) {
   return withPluginSchema(db, async () => {
     const { results } = await db.prepare(
       "SELECT * FROM configuration_history WHERE user_address = ? ORDER BY timestamp DESC LIMIT ?"
@@ -249,7 +260,15 @@ export async function getUserConfigurationHistory(db, userAddress: string, limit
   });
 }
 
-export async function logConfigurationChange(db, userAddress: string, settingKey: string, oldValue: any, newValue: any, changedBy: string = 'user'): Promise<void> {
+/**
+ * @param {any} db
+ * @param {string} userAddress
+ * @param {string} settingKey
+ * @param {any} oldValue
+ * @param {any} newValue
+ * @param {string} [changedBy]
+ */
+export async function logConfigurationChange(db, userAddress, settingKey, oldValue, newValue, changedBy = 'user') {
   return withPluginSchema(db, async () => {
     const timestamp = Math.floor(Date.now() / 1000);
     
