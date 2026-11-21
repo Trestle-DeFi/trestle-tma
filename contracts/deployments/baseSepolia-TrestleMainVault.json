@@ -1,14 +1,14 @@
 {
   "network": "baseSepolia",
   "contract": "TrestleMainVault",
-  "address": "0x082FC73Cd19e62e19d74279B60b93cF8102C50e4",
+  "address": "0xd8FD13A95e54640206167d31bb39eF5FfF5dF231",
   "deployer": "0x9280b24542a52cEE54a78dB65A497D8BeC4BAB94",
   "callbackProxy": "0x476F44b11F5C942c58f4c8E3d0300E5710743585",
-  "reactiveSender": "0x976c6D9F4544E0b2f471698AdaeF54777C6FA3D2",
+  "reactiveSender": "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3",
   "constructorArgs": [
     "0x476F44b11F5C942c58f4c8E3d0300E5710743585",
-    "0x976c6D9F4544E0b2f471698AdaeF54777C6FA3D2"
+    "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3"
   ],
-  "timestamp": "2026-11-18T23:07:21.783Z",
-  "txHash": "0x2b9221c56d9f66dd19b7f87de9259eb346de1f939b936589c40057a9d39f42fe"
+  "timestamp": "2026-11-20T14:55:43.911Z",
+  "txHash": "0x7906accd5cb91069a28dac4bef850e2c2045c7f35ab005248873362e09b1eb54"
 }

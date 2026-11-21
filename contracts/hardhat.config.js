@@ -47,9 +47,29 @@ module.exports = {
           browserURL: "https://sepolia.basescan.org",
         },
       },
+      {
+        network: "unichainSepolia",
+        chainId: 1301,
+        urls: {
+          apiURL: "https://unichain-sepolia.blockscout.com/api",
+          browserURL: "https://unichain-sepolia.blockscout.com",
+        },
+      },
+    ],
+  },
+  blockscout: {
+    customChains: [
+      {
+        network: "unichainSepolia",
+        chainId: 1301,
+        urls: {
+          apiURL: "https://unichain-sepolia.blockscout.com/api",
+          browserURL: "https://unichain-sepolia.blockscout.com",
+        },
+      },
     ],
   },
   sourcify: {
-    enabled: true,
+    enabled: false,
   },
 };

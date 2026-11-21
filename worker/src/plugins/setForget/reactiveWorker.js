@@ -2,7 +2,7 @@ import { createPublicClient, http, keccak256, toHex } from "viem";
 
 // ─── On-chain configuration ────────────────────────────────────────────────
 // ReactiveGuard lives on Lasna (Reactive Network testnet, chainId 5318007).
-export const DEFAULT_GUARD_ADDRESS = "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88";
+export const DEFAULT_GUARD_ADDRESS = "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3";
 export const DEFAULT_LASNA_RPC = "https://lasna-rpc.rnk.dev/";
 
 // topic0 of the origin-chain event the guard reacts to:
@@ -117,7 +117,7 @@ export async function readOnChainGuardConfig(env) {
   return {
     originChainId: Number(originChainId),
     originContract,
-    lowBalanceTopic: String(lowBalanceTopic),
+    lowBalanceTopic: `0x${lowBalanceTopic.toString(16).padStart(64, "0")}`,
     callbackRecipient: recipient,
   };
 }
@@ -195,12 +195,30 @@ export async function getReactiveStatus(db, env = {}) {
   const stored = await listSubscriptions(db).catch(() => []);
   subscriptions = await Promise.all(
     stored.map(async (sub) => {
-      if (!isConnected) return sub;
+      const configRow = await db
+        .prepare(
+          "SELECT threshold, target, cooldown, max_daily FROM sub_accounts WHERE user_address = ?"
+        )
+        .bind(sub.subAccountAddress)
+        .first()
+        .catch(() => null);
+
+      const userConfig = configRow
+        ? {
+            threshold: String(configRow.threshold),
+            target: String(configRow.target),
+            cooldown: Number(configRow.cooldown),
+            maxDaily: Number(configRow.max_daily),
+          }
+        : null;
+
+      if (!isConnected) return { ...sub, config: userConfig };
       try {
         const chain = await readOnChainSubscription(env, sub.subAccountAddress);
         return {
           ...sub,
           isActive: chain.isActive,
+          config: userConfig,
           onChain: {
             maxDailyRefills: chain.maxDailyRefills,
             dailyRefillCount: chain.dailyRefillCount,
@@ -211,7 +229,7 @@ export async function getReactiveStatus(db, env = {}) {
           },
         };
       } catch {
-        return sub;
+        return { ...sub, config: userConfig };
       }
     })
   );

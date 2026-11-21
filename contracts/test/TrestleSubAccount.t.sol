@@ -123,20 +123,63 @@ contract TrestleSubAccountTest is Test {
             5e15,
             1e16,
             300,
-            1 // maxDaily = 1 wei per day
+            1 // maxDaily = 1 spend per day
         );
 
-        // Fund with enough ETH to exceed daily limit
         vm.deal(address(subAccount), 2e18); // 2 ETH
-
-        // Warp past cooldown
         vm.warp(block.timestamp + 301);
 
         address recipient = vm.addr(3);
 
-        // Try to spend more than maxDaily * 1e18 = 1e18
+        subAccount.spend(recipient, 1e15, address(0));
+
+        vm.warp(block.timestamp + 301);
         vm.expectRevert("Daily limit exceeded");
-        subAccount.spend(recipient, 2e18, address(0));
+        subAccount.spend(recipient, 1e15, address(0));
+        vm.stopPrank();
+    }
+
+    function testDailyLimitResetsNextDay() public {
+        vm.startPrank(owner);
+        subAccount.createSubAccount(address(0), 5e15, 1e16, 300, 1);
+
+        vm.deal(address(subAccount), 2e18);
+        vm.warp(block.timestamp + 301);
+
+        address recipient = vm.addr(3);
+        subAccount.spend(recipient, 1e15, address(0));
+
+        TrestleSubAccount.SubAccountConfig memory info = subAccount.getSubAccountInfo(owner);
+        assertEq(info.spendsToday, 1);
+        assertEq(info.totalSpentToday, 1e15);
+
+        vm.warp(block.timestamp + 86400 + 301);
+        subAccount.spend(recipient, 1e15, address(0));
+
+        info = subAccount.getSubAccountInfo(owner);
+        assertEq(info.spendsToday, 1);
+        assertEq(info.totalSpentToday, 1e15);
+        vm.stopPrank();
+    }
+
+    function testUpdateConfigRevertsTargetBelowThreshold() public {
+        vm.startPrank(owner);
+        subAccount.createSubAccount(address(0), 5e15, 1e16, 300, 10);
+
+        vm.expectRevert("Target below threshold");
+        subAccount.updateConfig(1e16, 1e15, 300, 10);
+        vm.stopPrank();
+    }
+
+    function testOwnerCanChangeLimits() public {
+        vm.startPrank(owner);
+        subAccount.setLimits(1e14, 60, 50);
+
+        assertEq(subAccount.minThreshold(), 1e14);
+        assertEq(subAccount.minCooldownPeriod(), 60);
+        assertEq(subAccount.maxDailyLimit(), 50);
+
+        subAccount.createSubAccount(address(0), 1e14, 1e16, 60, 50);
         vm.stopPrank();
     }
 

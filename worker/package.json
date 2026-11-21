@@ -5,6 +5,9 @@
   "description": "Trestle TMA worker services",
   "type": "module",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node src/index.js",
     "deploy": "wrangler deploy",
@@ -17,5 +20,9 @@
   },
   "devDependencies": {
     "wrangler": "4.161.0"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "workerd": true
   }
 }

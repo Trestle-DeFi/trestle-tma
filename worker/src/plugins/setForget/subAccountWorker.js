@@ -1,3 +1,4 @@
+import { parseEther } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { withPluginSchema } from "./schema.js";
 
@@ -25,6 +26,8 @@ function toApiSubAccount(row) {
     mainVault: row.main_vault_ref,
     threshold: String(row.threshold ?? "0"),
     target: String(row.target ?? "0"),
+    thresholdWei: ethToWeiString(row.threshold),
+    targetWei: ethToWeiString(row.target),
     cooldown: Number(row.cooldown ?? 0),
     maxDaily: Number(row.max_daily ?? 0),
     isActive: !!row.is_active,
@@ -33,6 +36,89 @@ function toApiSubAccount(row) {
     sequence: Number(row.sequence ?? 0),
     totalSpentToday: Number(row.total_spent_today ?? 0),
   };
+}
+
+function ethToWeiString(value) {
+  try {
+    return String(parseEther(String(value ?? "0")));
+  } catch {
+    return "0";
+  }
+}
+
+// Protocol bounds for per-user settings. They are configurable per deployment
+// (env vars) so a user is never pinned to a hardcoded threshold/cooldown/limit.
+export const DEFAULT_BOUNDS = {
+  minThresholdWei: 1_000_000_000_000_000n,
+  minCooldownSeconds: 300,
+  maxDaily: 1000,
+};
+
+export function resolveBounds(env = {}) {
+  const parseBigInt = (value, fallback) => {
+    if (value === undefined || value === null || value === "") return fallback;
+    try {
+      return BigInt(value);
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    minThresholdWei: parseBigInt(
+      env.SET_FORGET_MIN_THRESHOLD_WEI,
+      DEFAULT_BOUNDS.minThresholdWei
+    ),
+    minCooldownSeconds: Number(
+      env.SET_FORGET_MIN_COOLDOWN_SECONDS || DEFAULT_BOUNDS.minCooldownSeconds
+    ),
+    maxDaily: Number(env.SET_FORGET_MAX_DAILY || DEFAULT_BOUNDS.maxDaily),
+  };
+}
+
+export class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+    this.code = "INVALID_CONFIG";
+  }
+}
+
+// Validate a per-user top-up configuration. Thresholds/targets are expressed
+// in ETH (18 decimals on chain) and are converted to wei for the bounds check.
+export function validateSubAccountConfig(config, bounds = DEFAULT_BOUNDS) {
+  const toWei = (value, label) => {
+    try {
+      return parseEther(String(value ?? "0"));
+    } catch {
+      throw new ValidationError(`${label} must be a valid ETH amount`);
+    }
+  };
+
+  const thresholdWei = toWei(config.threshold, "Threshold");
+  const targetWei = toWei(config.target, "Target");
+  const cooldown = Number(config.cooldown ?? 0);
+  const maxDaily = Number(config.maxDaily ?? 0);
+
+  if (thresholdWei < bounds.minThresholdWei) {
+    throw new ValidationError(
+      `Threshold must be at least ${bounds.minThresholdWei} wei`
+    );
+  }
+  if (targetWei <= thresholdWei) {
+    throw new ValidationError("Target must be greater than threshold");
+  }
+  if (cooldown < bounds.minCooldownSeconds) {
+    throw new ValidationError(
+      `Cooldown must be at least ${bounds.minCooldownSeconds} seconds`
+    );
+  }
+  if (!Number.isInteger(maxDaily) || maxDaily < 1 || maxDaily > bounds.maxDaily) {
+    throw new ValidationError(
+      `Max daily limit must be between 1 and ${bounds.maxDaily}`
+    );
+  }
+
+  return { thresholdWei, targetWei, cooldown, maxDaily };
 }
 
 // Accept both camelCase (from the TMA) and snake_case (internal) update keys.
@@ -47,7 +133,7 @@ const UPDATE_FIELDS = {
   sequence: "sequence",
 };
 
-export async function createSubAccount(db, address, mainVaultRef, config) {
+export async function createSubAccount(db, address, mainVaultRef, config, bounds = DEFAULT_BOUNDS) {
   const {
     threshold = "0",
     target = "0",
@@ -58,6 +144,8 @@ export async function createSubAccount(db, address, mainVaultRef, config) {
   if (!address || !mainVaultRef) {
     throw new Error("address and mainVault are required");
   }
+
+  validateSubAccountConfig({ threshold, target, cooldown, maxDaily }, bounds);
 
   return withPluginSchema(db, async () => {
     const existing = await db.prepare(
@@ -86,6 +174,13 @@ export async function createSubAccount(db, address, mainVaultRef, config) {
       "SELECT * FROM sub_accounts WHERE user_address = ?"
     ).bind(address).first();
 
+    await logConfigurationChanges(db, address, {}, {
+      threshold: String(threshold),
+      target: String(target),
+      cooldown: Number(cooldown) || 0,
+      maxDaily: Number(maxDaily) || 0,
+    });
+
     return toApiSubAccount(row);
   });
 }
@@ -108,7 +203,7 @@ export async function listSubAccounts(db) {
   });
 }
 
-export async function updateSubAccount(db, address, updates) {
+export async function updateSubAccount(db, address, updates, bounds = DEFAULT_BOUNDS) {
   const filteredUpdates = {};
   for (const [key, value] of Object.entries(updates || {})) {
     const column = UPDATE_FIELDS[key];
@@ -121,6 +216,22 @@ export async function updateSubAccount(db, address, updates) {
   }
 
   return withPluginSchema(db, async () => {
+    const existing = await db.prepare(
+      "SELECT * FROM sub_accounts WHERE user_address = ?"
+    ).bind(address).first();
+
+    if (!existing) {
+      throw new Error(`Sub-account not found: ${address}`);
+    }
+
+    const merged = {
+      threshold: filteredUpdates.threshold ?? existing.threshold,
+      target: filteredUpdates.target ?? existing.target,
+      cooldown: filteredUpdates.cooldown ?? existing.cooldown,
+      maxDaily: filteredUpdates.max_daily ?? existing.max_daily,
+    };
+    validateSubAccountConfig(merged, bounds);
+
     const setClause = Object.keys(filteredUpdates)
       .map(key => `${key} = ?`)
       .join(", ");
@@ -142,8 +253,46 @@ export async function updateSubAccount(db, address, updates) {
       throw new Error(`Sub-account not found: ${address}`);
     }
 
+    await logConfigurationChanges(
+      db,
+      address,
+      {
+        threshold: String(existing.threshold),
+        target: String(existing.target),
+        cooldown: Number(existing.cooldown),
+        maxDaily: Number(existing.max_daily),
+      },
+      {
+        threshold: String(merged.threshold),
+        target: String(merged.target),
+        cooldown: Number(merged.cooldown),
+        maxDaily: Number(merged.maxDaily),
+      }
+    );
+
     return toApiSubAccount(row);
   });
+}
+
+async function logConfigurationChanges(db, address, previous, next) {
+  const entries = Object.entries(next).filter(
+    ([key, value]) => String(previous[key] ?? "") !== String(value ?? "")
+  );
+
+  for (const [key, value] of entries) {
+    await db.prepare(
+      "INSERT INTO configuration_history (user_address, setting_key, old_value, new_value, timestamp, changed_by) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+      .bind(
+        address,
+        key,
+        previous[key] === undefined ? null : String(previous[key]),
+        String(value),
+        Math.floor(Date.now() / 1000),
+        "user"
+      )
+      .run();
+  }
 }
 
 export async function deleteSubAccount(db, address) {
@@ -219,6 +368,14 @@ export async function getUserPreferences(db, userAddress) {
 }
 
 export async function saveUserPreferences(db, preferences) {
+  if (!preferences?.userAddress) {
+    throw new ValidationError("userAddress is required");
+  }
+  const riskLevel = preferences.riskLevel ?? "medium";
+  if (!["low", "medium", "high"].includes(riskLevel)) {
+    throw new ValidationError("riskLevel must be low, medium or high");
+  }
+
   return withPluginSchema(db, async () => {
     const now = Math.floor(Date.now() / 1000);
     
@@ -228,12 +385,12 @@ export async function saveUserPreferences(db, preferences) {
       preferences.userAddress,
       preferences.autoTopupEnabled ? 1 : 0,
       preferences.notificationsEnabled ? 1 : 0,
-      preferences.riskLevel,
+      riskLevel,
       preferences.gasOptimization ? 1 : 0,
       now
     ).run();
     
-    return { ...preferences, lastUpdated: now };
+    return { ...preferences, riskLevel, lastUpdated: now };
   });
 }
 

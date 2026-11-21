@@ -7,6 +7,10 @@ import {
   listSubAccounts,
   updateSubAccount,
   deleteSubAccount,
+  getUserPreferences,
+  saveUserPreferences,
+  getUserConfigurationHistory,
+  resolveBounds,
 } from "./subAccountWorker.js";
 import {
   getReactiveStatus,
@@ -42,7 +46,8 @@ app.post("/api/plugins/set-forget/subaccounts", async (c) => {
       c.env.DB,
       address,
       mainVault,
-      config
+      config,
+      resolveBounds(c.env)
     );
 
     return c.json(subAccount);
@@ -52,7 +57,7 @@ app.post("/api/plugins/set-forget/subaccounts", async (c) => {
       source: "create-subaccount",
       user: "unknown"
     });
-    return c.json({ error: e.message }, 500);
+    return c.json({ error: e.message }, e.code === "INVALID_CONFIG" ? 400 : 500);
   }
 });
 
@@ -100,7 +105,8 @@ app.put("/api/plugins/set-forget/subaccounts/:address", async (c) => {
     const subAccount = await updateSubAccount(
       c.env.DB, 
       address, 
-      updates
+      updates,
+      resolveBounds(c.env)
     );
     
     return c.json(subAccount);
@@ -110,7 +116,7 @@ app.put("/api/plugins/set-forget/subaccounts/:address", async (c) => {
       source: "update-subaccount", 
       user: c.req.param("address") 
     });
-    return c.json({ error: e.message }, 500);
+    return c.json({ error: e.message }, e.code === "INVALID_CONFIG" ? 400 : 500);
   }
 });
 
@@ -125,6 +131,75 @@ app.delete("/api/plugins/set-forget/subaccounts/:address", async (c) => {
       message: e.message, 
       source: "delete-subaccount", 
       user: c.req.param("address") 
+    });
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// ─── Per-user configuration API ───────────────────────────────────────────
+
+app.get("/api/plugins/set-forget/configuration/preferences", async (c) => {
+  try {
+    const address = c.req.query("address");
+    if (!address) {
+      return c.json({ error: "address is required" }, 400);
+    }
+
+    const preferences = await withPluginSchema(c.env.DB, () =>
+      getUserPreferences(c.env.DB, address)
+    );
+
+    return c.json({ preferences });
+  } catch (e) {
+    await writeLog(c.env.DB, {
+      message: e.message,
+      source: "get-preferences",
+    });
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+app.put("/api/plugins/set-forget/configuration/preferences", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { userAddress, ...preferences } = body;
+
+    if (!userAddress) {
+      return c.json({ error: "userAddress is required" }, 400);
+    }
+
+    const saved = await withPluginSchema(c.env.DB, () =>
+      saveUserPreferences(c.env.DB, { userAddress, ...preferences })
+    );
+
+    return c.json({ preferences: saved });
+  } catch (e) {
+    await writeLog(c.env.DB, {
+      message: e.message,
+      source: "save-preferences",
+      user: "unknown",
+    });
+    return c.json({ error: e.message }, e.code === "INVALID_CONFIG" ? 400 : 500);
+  }
+});
+
+app.get("/api/plugins/set-forget/configuration/history", async (c) => {
+  try {
+    const address = c.req.query("address");
+    if (!address) {
+      return c.json({ error: "address is required" }, 400);
+    }
+
+    const limit = Number(c.req.query("limit") || 50);
+    const history = await withPluginSchema(c.env.DB, () =>
+      getUserConfigurationHistory(c.env.DB, address, limit)
+    );
+
+    return c.json({ history });
+  } catch (e) {
+    await writeLog(c.env.DB, {
+      message: e.message,
+      source: "get-configuration-history",
     });
     return c.json({ error: e.message }, 500);
   }
@@ -181,6 +256,14 @@ app.post("/api/plugins/set-forget/reactive/subscription", async (c) => {
       callbackUrl: resolvedCallbackUrl,
       lasnaTopic: subscription.lasnaTopic,
       isActive: subscription.isActive,
+      config: {
+        threshold: subAccount.threshold,
+        target: subAccount.target,
+        thresholdWei: subAccount.thresholdWei,
+        targetWei: subAccount.targetWei,
+        cooldown: subAccount.cooldown,
+        maxDaily: subAccount.maxDaily,
+      },
       onChain,
       events: ["LowBalanceDetected"],
     });

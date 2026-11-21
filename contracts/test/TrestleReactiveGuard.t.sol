@@ -146,5 +146,20 @@ contract TrestleReactiveGuardTest is Test {
         guard.updateSubscription(subAccount, false, 10);
         assertFalse(guard.getSubscriptionStatus(subAccount).isActive);
     }
+
+    function testOwnerCanChangeMaxDailyRefillsLimit() public {
+        vm.prank(owner);
+        guard.setMaxDailyRefillsLimit(25);
+        assertEq(guard.maxDailyRefillsLimit(), 25);
+
+        address other = vm.addr(9);
+        vm.prank(owner);
+        guard.setupSubscription(other, 25);
+        assertEq(guard.getSubscriptionStatus(other).maxDailyRefills, 25);
+
+        vm.prank(owner);
+        vm.expectRevert("Invalid max daily refills");
+        guard.setupSubscription(vm.addr(10), 26);
+    }
 }
 

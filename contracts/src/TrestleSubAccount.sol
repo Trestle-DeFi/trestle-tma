@@ -24,7 +24,9 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
         uint64 cooldown;
         uint64 maxDaily;
         uint64 sequence;
+        uint64 spendsToday;
         uint256 totalSpentToday;
+        uint256 lastSpendDay;
         bool isActive;
         uint256 createdAt;
         uint256 lastTopUpTime;
@@ -40,6 +42,12 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
     uint64 public constant COOLDOWN_PERIOD = 300;
     uint64 public constant MAX_DAILY_LIMIT = 1000;
 
+    uint256 public minThreshold = MIN_THRESHOLD;
+    uint64 public minCooldownPeriod = COOLDOWN_PERIOD;
+    uint64 public maxDailyLimit = MAX_DAILY_LIMIT;
+
+    event LimitsUpdated(uint256 minThreshold, uint64 minCooldownPeriod, uint64 maxDailyLimit);
+
     modifier onlyAuthorized() {
         require(authorizedOperators[msg.sender] || msg.sender == owner(), "Not authorized");
         _;
@@ -49,6 +57,16 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
         authorizedOperators[msg.sender] = true;
     }
 
+    function setLimits(uint256 _minThreshold, uint64 _minCooldownPeriod, uint64 _maxDailyLimit) external onlyOwner {
+        require(_minThreshold > 0, "Invalid minimum threshold");
+        require(_minCooldownPeriod > 0, "Invalid minimum cooldown");
+        require(_maxDailyLimit > 0, "Invalid maximum daily limit");
+        minThreshold = _minThreshold;
+        minCooldownPeriod = _minCooldownPeriod;
+        maxDailyLimit = _maxDailyLimit;
+        emit LimitsUpdated(_minThreshold, _minCooldownPeriod, _maxDailyLimit);
+    }
+
     function createSubAccount(
         address _mainVault,
         uint256 _threshold,
@@ -56,9 +74,10 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
         uint64 _cooldown,
         uint64 _maxDaily
     ) external onlyOwner {
-        require(_threshold >= MIN_THRESHOLD, "Threshold too low");
-        require(_cooldown >= COOLDOWN_PERIOD, "Cooldown too short");
-        require(_maxDaily > 0 && _maxDaily <= MAX_DAILY_LIMIT, "Invalid max daily limit");
+        require(_threshold >= minThreshold, "Threshold too low");
+        require(_target > _threshold, "Target below threshold");
+        require(_cooldown >= minCooldownPeriod, "Cooldown too short");
+        require(_maxDaily > 0 && _maxDaily <= maxDailyLimit, "Invalid max daily limit");
         require(subAccounts[msg.sender].isActive == false, "Sub-account exists");
 
         subAccounts[msg.sender] = SubAccountConfig({
@@ -68,7 +87,9 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
             cooldown: _cooldown,
             maxDaily: _maxDaily,
             sequence: 0,
+            spendsToday: 0,
             totalSpentToday: 0,
+            lastSpendDay: block.timestamp / 86400,
             isActive: true,
             createdAt: block.timestamp,
             lastTopUpTime: block.timestamp
@@ -86,8 +107,10 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
         SubAccountConfig storage config = subAccounts[subAccount];
         require(config.isActive, "Sub-account not active");
         require(block.timestamp >= config.lastTopUpTime + config.cooldown, "Cooldown active");
-        require(config.totalSpentToday + amount <= uint256(config.maxDaily) * 1e18, "Daily limit exceeded");
+        _rollSpendDay(config);
+        require(config.spendsToday < config.maxDaily, "Daily limit exceeded");
         config.sequence++;
+        config.spendsToday++;
         config.totalSpentToday += amount;
         if (token == address(0)) {
             require(address(this).balance >= amount, "Insufficient ETH balance");
@@ -110,13 +133,23 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
         emit SpendRequested(subAccount, amount, recipient);
     }
 
+    function _rollSpendDay(SubAccountConfig storage config) internal {
+        uint256 day = block.timestamp / 86400;
+        if (config.lastSpendDay != day) {
+            config.lastSpendDay = day;
+            config.spendsToday = 0;
+            config.totalSpentToday = 0;
+        }
+    }
+
     function updateConfig(uint256 newThreshold, uint256 newTarget, uint64 newCooldown, uint64 newMaxDaily)
         external
         onlyAuthorized
     {
-        require(newThreshold >= MIN_THRESHOLD, "Threshold too low");
-        require(newCooldown >= COOLDOWN_PERIOD, "Cooldown too short");
-        require(newMaxDaily > 0 && newMaxDaily <= MAX_DAILY_LIMIT, "Invalid max daily limit");
+        require(newThreshold >= minThreshold, "Threshold too low");
+        require(newTarget > newThreshold, "Target below threshold");
+        require(newCooldown >= minCooldownPeriod, "Cooldown too short");
+        require(newMaxDaily > 0 && newMaxDaily <= maxDailyLimit, "Invalid max daily limit");
         SubAccountConfig storage config = subAccounts[msg.sender];
         config.threshold = newThreshold;
         config.target = newTarget;

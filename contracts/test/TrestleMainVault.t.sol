@@ -138,4 +138,46 @@ contract TrestleMainVaultTest is Test {
         vm.expectRevert("Insufficient vault balance");
         vault.releaseTopup(reactiveSender, requestId, destination, 1e16, block.timestamp, sequence);
     }
+
+    function testEnforcesPerSubAccountDailyLimit() public {
+        vm.prank(owner);
+        vault.setSubAccountDailyLimit(destination, 1);
+
+        vm.prank(owner);
+        vault.requestTopUp(destination, 1, 1e16);
+
+        vm.prank(owner);
+        vm.expectRevert("Daily request limit exceeded");
+        vault.requestTopUp(destination, 2, 1e16);
+
+        (uint64 count, uint256 day) = vault.getDailyRequestCount(destination);
+        assertEq(count, 1);
+        assertEq(day, block.timestamp / 86400);
+    }
+
+    function testDailyLimitResetsNextDay() public {
+        vm.prank(owner);
+        vault.setSubAccountDailyLimit(destination, 1);
+
+        vm.prank(owner);
+        vault.requestTopUp(destination, 1, 1e16);
+
+        vm.warp(block.timestamp + 86400);
+
+        vm.prank(owner);
+        vault.requestTopUp(destination, 2, 1e16);
+
+        (uint64 count,) = vault.getDailyRequestCount(destination);
+        assertEq(count, 1);
+    }
+
+    function testOwnerCanChangeDefaultDailyLimit() public {
+        vm.prank(owner);
+        vault.setDefaultMaxDailyRequests(2);
+        assertEq(vault.getEffectiveDailyLimit(destination), 2);
+
+        vm.prank(owner);
+        vault.setSubAccountDailyLimit(destination, 5);
+        assertEq(vault.getEffectiveDailyLimit(destination), 5);
+    }
 }

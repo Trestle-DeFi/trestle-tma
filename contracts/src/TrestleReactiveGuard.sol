@@ -27,6 +27,8 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
     uint64 public constant MAX_DAILY_DEFAULT = 10;
     uint256 public constant COOLDOWN_PERIOD = 300;
 
+    uint64 public maxDailyRefillsLimit = MAX_DAILY_DEFAULT;
+
     uint256 public immutable ORIGIN_CHAIN_ID;
     address public immutable ORIGIN_CONTRACT;
     uint256 public immutable LOW_BALANCE_TOPIC;
@@ -46,6 +48,7 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
     event EventProcessed(bytes32 indexed eventHash, address indexed subAccount, uint256 amount, uint256 timestamp);
     event DailyLimitReached(address indexed subAccount);
     event CooldownEnforced(address indexed subAccount, uint256 retryAfter);
+    event MaxDailyRefillsLimitUpdated(uint64 limit);
 
     constructor(uint256 originChainId_, address originContract_, uint256 lowBalanceTopic_) payable Ownable(msg.sender) {
         require(originChainId_ != 0, "Origin chain required");
@@ -66,9 +69,15 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
         callbackRecipient = recipient;
     }
 
+    function setMaxDailyRefillsLimit(uint64 limit) external onlyOwner {
+        require(limit > 0, "Invalid max daily refills limit");
+        maxDailyRefillsLimit = limit;
+        emit MaxDailyRefillsLimitUpdated(limit);
+    }
+
     function setupSubscription(address subAccount, uint64 maxDailyRefills) external onlyOwner {
         require(!subscriptions[subAccount].isActive, "Subscription exists");
-        require(maxDailyRefills > 0 && maxDailyRefills <= MAX_DAILY_DEFAULT, "Invalid max daily refills");
+        require(maxDailyRefills > 0 && maxDailyRefills <= maxDailyRefillsLimit, "Invalid max daily refills");
 
         subscriptions[subAccount] = Subscription({
             subAccount: subAccount,
@@ -90,7 +99,7 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
                 || subscriptions[subAccount].maxDailyRefills != newMaxDailyRefills,
             "No change needed"
         );
-        require(newMaxDailyRefills > 0 && newMaxDailyRefills <= MAX_DAILY_DEFAULT, "Invalid max daily refills");
+        require(newMaxDailyRefills > 0 && newMaxDailyRefills <= maxDailyRefillsLimit, "Invalid max daily refills");
         Subscription storage sub = subscriptions[subAccount];
         sub.isActive = isActive;
         sub.maxDailyRefills = newMaxDailyRefills;

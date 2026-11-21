@@ -4,17 +4,15 @@ import { ConfigurationPanel } from './ConfigurationPanel';
 import SubAccountCard from '../../plugins/setForget/components/SubAccountCard';
 import { useSubAccount, SubAccount } from '../../plugins/setForget/hooks/useSubAccount';
 import { useReactive } from '../../plugins/setForget/hooks/useReactive';
+import { useConfiguration } from '../../plugins/setForget/hooks/useConfiguration';
+import { DEFAULT_PREFERENCES, UserPreferenceValues } from '../../plugins/setForget/config';
 import { SET_FORGET_CONTRACTS, CHAIN_CONFIG } from '../../config/contracts';
 
 export interface UserConfiguration extends SubAccount {
   // SubAccount already carries address/threshold/target/cooldown/maxDaily and timestamps.
 }
 
-export interface UserPreferences {
-  autoTopupEnabled: boolean;
-  notificationsEnabled: boolean;
-  riskLevel: 'low' | 'medium' | 'high';
-  gasOptimization: boolean;
+export interface UserPreferences extends UserPreferenceValues {
   lastUpdated: number;
 }
 
@@ -28,6 +26,7 @@ export const ConfigurationManager: React.FC = () => {
 
   const { fetchSubAccounts, updateSubAccount, deleteSubAccount } = useSubAccount();
   const { status: reactiveStatus } = useReactive();
+  const { preferences: storedPreferences, history, loadPreferences, savePreferences, loadHistory } = useConfiguration();
 
   useEffect(() => {
     if (walletAddress) {
@@ -47,18 +46,21 @@ export const ConfigurationManager: React.FC = () => {
         acc.address.toLowerCase() === walletAddress.toLowerCase()
       );
       setUserConfigurations(userConfigs);
-      
-      // Load user preferences from localStorage
+
+      // Per-user preferences are stored on the worker; the browser copy is a
+      // fallback for when the plugin API is unreachable.
+      const stored = await loadPreferences(walletAddress);
+      if (stored) {
+        setUserPreferences(stored);
+        return;
+      }
+
       const savedPrefs = localStorage.getItem(`user-config-${walletAddress}`);
       if (savedPrefs) {
         setUserPreferences(JSON.parse(savedPrefs));
       } else {
-        // Set default preferences
         setUserPreferences({
-          autoTopupEnabled: true,
-          notificationsEnabled: true,
-          riskLevel: 'medium',
-          gasOptimization: true,
+          ...DEFAULT_PREFERENCES,
           lastUpdated: Date.now(),
         });
       }
@@ -70,10 +72,17 @@ export const ConfigurationManager: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (activeTab === 'history' && walletAddress) {
+      loadHistory(walletAddress);
+    }
+  }, [activeTab, walletAddress]);
+
   const handleConfigurationChange = (newPrefs: Partial<UserPreferences>) => {
     if (!walletAddress) return;
     
     const updatedPrefs = {
+      ...DEFAULT_PREFERENCES,
       ...userPreferences,
       ...newPrefs,
       lastUpdated: Date.now(),
@@ -81,6 +90,9 @@ export const ConfigurationManager: React.FC = () => {
     
     setUserPreferences(updatedPrefs);
     localStorage.setItem(`user-config-${walletAddress}`, JSON.stringify(updatedPrefs));
+    savePreferences(walletAddress, updatedPrefs).catch((error) => {
+      console.error('Failed to persist preferences:', error);
+    });
   };
 
   const handleSubAccountUpdate = async (address: string, updates: Partial<UserConfiguration>) => {
@@ -216,19 +228,33 @@ export const ConfigurationManager: React.FC = () => {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold mb-4">Configuration History</h2>
-            
-            <div className="text-center py-8">
-              <p className="text-gray-500">Configuration history will be displayed here.</p>
-              <p className="text-sm text-gray-400 mt-2">
-                Track changes to your configuration over time, including:
-              </p>
-              <ul className="text-sm text-gray-400 mt-2 space-y-1">
-                <li>• Threshold and target changes</li>
-                <li>• Auto-topup toggle history</li>
-                <li>• Risk level adjustments</li>
-                <li>• Integration events</li>
+
+            {!walletAddress ? (
+              <p className="text-gray-500">Connect your wallet to view your configuration history.</p>
+            ) : history.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No configuration changes recorded yet.</p>
+                <p className="text-sm text-gray-400 mt-2">
+                  Changes to your threshold, target, cooldown and daily limit are stored per user.
+                </p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-gray-100">
+                {history.map((entry) => (
+                  <li key={entry.id} className="py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{entry.settingKey}</p>
+                      <p className="text-xs text-gray-500">
+                        {entry.oldValue ?? '—'} → {entry.newValue ?? '—'}
+                      </p>
+                    </div>
+                    <span className="text-xs text-gray-400">
+                      {new Date(entry.timestamp * 1000).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
               </ul>
-            </div>
+            )}
           </div>
         </div>
       )}

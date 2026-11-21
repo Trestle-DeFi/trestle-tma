@@ -25,8 +25,11 @@
   },
   "vars": {
     "VAULT_SETTLEMENT_ADDRESS": "0x89e1404902a861DCFedbC685617B6cc986fD852E",
-    "REACTIVE_GUARD_ADDRESS": "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88",
-    "LASNA_RPC_URL": "https://lasna-rpc.rnk.dev/"
+    "REACTIVE_GUARD_ADDRESS": "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3",
+    "LASNA_RPC_URL": "https://lasna-rpc.rnk.dev/",
+    "SET_FORGET_MIN_THRESHOLD_WEI": "1000000000000000",
+    "SET_FORGET_MIN_COOLDOWN_SECONDS": "300",
+    "SET_FORGET_MAX_DAILY": "1000"
   },
   "observability": {
     "enabled": true

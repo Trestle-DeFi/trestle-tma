@@ -13,15 +13,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: 'worker/.nvmrc'
           cache: npm
           cache-dependency-path: worker/package-lock.json
       - name: Install dependencies
         run: npm ci
         working-directory: worker
+      - name: Ensure workerd runtime is installed
+        run: |
+          npm rebuild workerd --foreground-scripts
+          node_modules/workerd/bin/workerd --version
+        working-directory: worker
+      - name: Bundle check
+        run: npm run deploy:dry-run
+        working-directory: worker
       - name: Run worker tests
         run: npm test
         working-directory: worker
+        timeout-minutes: 5
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:

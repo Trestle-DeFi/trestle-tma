@@ -1,97 +1,120 @@
 const fs = require("fs");
 const path = require("path");
 
-const contractsDir = path.join(__dirname, "src");
-const nodeModulesDir = path.join(__dirname, "node_modules");
+const contractsDir = __dirname;
+const nodeModulesDir = path.join(contractsDir, "node_modules");
 
-// Read all source files recursively
-function readAllSources(startFile) {
+const SOLC_SETTINGS = {
+  optimizer: { enabled: true, runs: 200 },
+  evmVersion: "cancun",
+  viaIR: true,
+  outputSelection: {
+    "*": {
+      "*": ["abi", "evm.bytecode", "evm.deployedBytecode", "evm.methodIdentifiers", "metadata"],
+      "": ["ast"],
+    },
+  },
+};
+
+const IMPORT_REGEX = /import\s+(?:[^;]*?from\s+)?["']([^"']+)["']\s*;/g;
+
+function sourceRoot(key) {
+  return key.startsWith("src/") ? contractsDir : nodeModulesDir;
+}
+
+function resolveImportPath(importerKey, importPath) {
+  if (importPath.startsWith(".")) {
+    const normalized = path.posix.normalize(path.posix.join(path.posix.dirname(importerKey), importPath));
+    return { key: normalized, file: path.join(sourceRoot(normalized), normalized) };
+  }
+  return { key: importPath, file: path.join(nodeModulesDir, importPath) };
+}
+
+function collectSources(entryKey) {
   const sources = {};
   const visited = new Set();
+  const stack = [entryKey];
 
-  function readFile(filePath) {
-    const resolved = path.resolve(filePath);
-    if (visited.has(resolved)) return;
-    visited.add(resolved);
-    
-    let content;
-    try {
-      content = fs.readFileSync(resolved, "utf8");
-    } catch (e) {
-      console.warn(`Warning: Could not read ${resolved}`);
-      return;
+  while (stack.length > 0) {
+    const key = stack.pop();
+    if (visited.has(key)) continue;
+    visited.add(key);
+
+    const file = path.join(sourceRoot(key), key);
+    if (!fs.existsSync(file)) {
+      console.warn(`Warning: source not found for ${key}`);
+      continue;
     }
 
-    // Store with path relative to contractsDir
-    const relPath = path.relative(contractsDir, resolved);
-    sources[relPath] = { content };
+    const content = fs.readFileSync(file, "utf8");
+    sources[key] = { content };
 
-    // Find all imports
-    const importRegex = /import\s+["']([^"']+)["']\s*;/g;
+    IMPORT_REGEX.lastIndex = 0;
     let match;
-    while ((match = importRegex.exec(content)) !== null) {
-      const importPath = match[1];
-      const resolvedImport = resolveImport(resolved, importPath);
-      if (resolvedImport) {
-        readFile(resolvedImport);
+    while ((match = IMPORT_REGEX.exec(content)) !== null) {
+      const resolved = resolveImportPath(key, match[1]);
+      if (fs.existsSync(resolved.file) || fs.existsSync(resolved.file + ".sol")) {
+        stack.push(fs.existsSync(resolved.file) ? resolved.key : resolved.key + ".sol");
+      } else {
+        console.warn(`Warning: could not resolve import ${match[1]} from ${key}`);
       }
     }
   }
 
-  function resolveImport(currentFile, importPath) {
-    const currentDir = path.dirname(currentFile);
-    
-    const candidates = [
-      path.join(currentDir, importPath),
-      path.join(contractsDir, importPath),
-      path.join(nodeModulesDir, importPath),
-    ];
-    
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
-      if (fs.existsSync(candidate + ".sol")) return candidate + ".sol";
-    }
-    
-    return null;
-  }
-
-  readFile(startFile);
   return sources;
 }
 
 const contracts = [
-  { name: "TrestleSubAccount", file: "TrestleSubAccount.sol", chain: "unichainSepolia", address: "0x976c6D9F4544E0b2f471698AdaeF54777C6FA3D2" },
-  { name: "TrestleMainVault", file: "TrestleMainVault.sol", chain: "baseSepolia", address: "0xd05d1626f7FB992F0B9862EeE29F4Ca688688Be7" },
-  { name: "TrestleReactiveGuard", file: "TrestleReactiveGuard.sol", chain: "lasnaTestnet", address: "0x9eD90e296D078Ec4621Dc18d4737dDe951551c88" },
+  {
+    name: "TrestleSubAccount",
+    key: "src/TrestleSubAccount.sol",
+    chain: "unichainSepolia",
+    deployment: "unichainSepolia-TrestleSubAccount.json",
+  },
+  {
+    name: "TrestleCCIPReceiver",
+    key: "src/TrestleCCIPReceiver.sol",
+    chain: "unichainSepolia",
+    deployment: "unichainSepolia-TrestleCCIPReceiver.json",
+  },
+  {
+    name: "TrestleMainVault",
+    key: "src/TrestleMainVault.sol",
+    chain: "baseSepolia",
+    deployment: "baseSepolia-TrestleMainVault.json",
+  },
+  {
+    name: "TrestleCCIPBridge",
+    key: "src/TrestleCCIPBridge.sol",
+    chain: "baseSepolia",
+    deployment: "baseSepolia-TrestleCCIPBridge.json",
+  },
+  {
+    name: "TrestleReactiveGuard",
+    key: "src/TrestleReactiveGuard.sol",
+    chain: "lasnaTestnet",
+    deployment: "lasnaTestnet-TrestleReactiveGuard.json",
+  },
 ];
 
-for (const { name, file, chain, address } of contracts) {
-  console.log(`\n=== Generating Standard JSON for ${name} ===`);
-  
-  const sources = readAllSources(path.join(contractsDir, file));
-  
-  console.log(`  Sources found: ${Object.keys(sources).length}`);
-  Object.keys(sources).forEach(k => console.log(`    - ${k}`));
-  
+for (const { name, key, chain, deployment } of contracts) {
+  const deploymentPath = path.join(contractsDir, "deployments", deployment);
+  const address = fs.existsSync(deploymentPath)
+    ? JSON.parse(fs.readFileSync(deploymentPath, "utf8")).address
+    : "";
+
   const standardJson = {
     language: "Solidity",
-    sources: sources,
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200,
-      },
-      evmVersion: "cancun",
-      viaIR: true,
-    },
+    sources: collectSources(key),
+    settings: SOLC_SETTINGS,
   };
 
-  const outputPath = path.join(__dirname, `standard-json-${name}.json`);
+  const outputPath = path.join(contractsDir, `standard-json-${name}.json`);
   fs.writeFileSync(outputPath, JSON.stringify(standardJson, null, 2));
-  
-  console.log(`  Generated: ${outputPath}`);
-  console.log(`  Contract address: ${address}`);
-  console.log(`  Chain: ${chain}`);
+
+  console.log(`Generated ${outputPath}`);
+  console.log(`  contract: ${name} | chain: ${chain} | address: ${address}`);
+  console.log(`  sources: ${Object.keys(standardJson.sources).length}`);
 }
 
-console.log("\n=== Done! Upload each standard-json-*.json to respective explorer ===");
+console.log("\nUpload each standard-json-*.json to the matching explorer (Sourcify v2 / Blockscout / Etherscan).");

@@ -15,7 +15,7 @@ vi.mock("../../lib/plugin", () => ({
 }));
 
 const WALLET = "0x1234567890abcdef1234567890abcdef12345678";
-const MAIN_VAULT = "0xd05d1626f7FB992F0B9862EeE29F4Ca688688Be7";
+const MAIN_VAULT = "0xd8FD13A95e54640206167d31bb39eF5FfF5dF231";
 
 const savedSubAccount = {
   address: WALLET,
@@ -274,6 +274,8 @@ describe("ConfigurationPanel", () => {
 
     await user.clear(thresholdInput());
     await user.type(thresholdInput(), "0.25");
+    await user.clear(targetInput());
+    await user.type(targetInput(), "0.5");
     await user.selectOptions(screen.getByRole("combobox"), "high");
     await user.click(toggleFor("Notifications Enabled"));
 
@@ -292,5 +294,25 @@ describe("ConfigurationPanel", () => {
     const stored = JSON.parse(localStorage.getItem(`user-config-${WALLET}`) ?? "{}");
     expect(stored.riskLevel).toBe("high");
     expect(stored.notificationsEnabled).toBe(false);
+  });
+
+  it("rejects a target that is not above the threshold", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockResolvedValue([]);
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await user.clear(thresholdInput());
+    await user.type(thresholdInput(), "0.25");
+
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Target must be greater than threshold")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Configuration saved successfully")).not.toBeInTheDocument();
   });
 });

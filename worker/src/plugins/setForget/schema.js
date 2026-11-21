@@ -61,6 +61,23 @@ const SCHEMA_STATEMENTS = [
     callback_status TEXT DEFAULT 'pending',
     FOREIGN KEY (subscription_id) REFERENCES reactive_subscriptions(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS user_preferences (
+    user_address TEXT PRIMARY KEY,
+    auto_topup_enabled BOOLEAN DEFAULT 1,
+    notifications_enabled BOOLEAN DEFAULT 1,
+    risk_level TEXT DEFAULT 'medium',
+    gas_optimization BOOLEAN DEFAULT 1,
+    last_updated INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS configuration_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_address TEXT NOT NULL,
+    setting_key TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    timestamp INTEGER NOT NULL,
+    changed_by TEXT
+  )`,
 ];
 
 let schemaReady = false;

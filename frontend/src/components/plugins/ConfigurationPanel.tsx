@@ -2,6 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAccount } from 'wagmi';
 import { useSubAccount, SubAccount } from '../../plugins/setForget/hooks/useSubAccount';
 import { useReactive } from '../../plugins/setForget/hooks/useReactive';
+import { useConfiguration } from '../../plugins/setForget/hooks/useConfiguration';
+import {
+  DEFAULT_PREFERENCES,
+  DEFAULT_SETTINGS,
+  RiskLevel,
+  SET_FORGET_BOUNDS,
+  validateSettings,
+} from '../../plugins/setForget/config';
 import SubAccountCard from '../../plugins/setForget/components/SubAccountCard';
 import { SET_FORGET_CONTRACTS, CHAIN_CONFIG } from '../../config/contracts';
 
@@ -26,14 +34,6 @@ const NETWORK_FLOW = [
   },
 ];
 
-const EMPTY_FORM = {
-  address: '',
-  threshold: '0.01',
-  target: '0.05',
-  cooldown: '300',
-  maxDaily: '10',
-};
-
 export interface ConfigurationPanelProps {
   onConfigurationChange?: (config: any) => void;
   userAddress?: string;
@@ -49,17 +49,18 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [threshold, setThreshold] = useState('0.01');
-  const [target, setTarget] = useState('0.05');
-  const [cooldown, setCooldown] = useState('300');
-  const [maxDaily, setMaxDaily] = useState('10');
-  const [autoTopupEnabled, setAutoTopupEnabled] = useState(true);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [riskLevel, setRiskLevel] = useState('medium');
-  const [gasOptimization, setGasOptimization] = useState(true);
+  const [threshold, setThreshold] = useState(DEFAULT_SETTINGS.threshold);
+  const [target, setTarget] = useState(DEFAULT_SETTINGS.target);
+  const [cooldown, setCooldown] = useState(String(DEFAULT_SETTINGS.cooldown));
+  const [maxDaily, setMaxDaily] = useState(String(DEFAULT_SETTINGS.maxDaily));
+  const [autoTopupEnabled, setAutoTopupEnabled] = useState(DEFAULT_PREFERENCES.autoTopupEnabled);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(DEFAULT_PREFERENCES.notificationsEnabled);
+  const [riskLevel, setRiskLevel] = useState(DEFAULT_PREFERENCES.riskLevel);
+  const [gasOptimization, setGasOptimization] = useState(DEFAULT_PREFERENCES.gasOptimization);
 
   const { fetchSubAccounts, createSubAccount, updateSubAccount } = useSubAccount();
   const { status: reactiveStatus } = useReactive();
+  const { loadPreferences, savePreferences } = useConfiguration();
 
   useEffect(() => {
     if (userAddress) {
@@ -73,28 +74,38 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
     try {
       setIsLoading(true);
       setError(null);
-      
+
       // Load sub-account configuration
       const subAccounts = await fetchSubAccounts();
       const userSubAccount = subAccounts.find((acc: SubAccount) => acc.address.toLowerCase() === address.toLowerCase());
-      
+
       if (userSubAccount) {
         setThreshold(userSubAccount.threshold);
         setTarget(userSubAccount.target);
         setCooldown(userSubAccount.cooldown.toString());
         setMaxDaily(userSubAccount.maxDaily.toString());
       }
-      
-      // Load additional user preferences from localStorage
+
+      // Per-user preferences live on the worker; the browser copy is only a
+      // fallback for when the plugin API is unreachable.
+      const stored = await loadPreferences(address);
+      if (stored) {
+        setAutoTopupEnabled(stored.autoTopupEnabled);
+        setNotificationsEnabled(stored.notificationsEnabled);
+        setRiskLevel(stored.riskLevel);
+        setGasOptimization(stored.gasOptimization);
+        return;
+      }
+
       const savedPrefs = localStorage.getItem(`user-config-${address}`);
       if (savedPrefs) {
         const prefs = JSON.parse(savedPrefs);
-        setAutoTopupEnabled(prefs.autoTopupEnabled ?? true);
-        setNotificationsEnabled(prefs.notificationsEnabled ?? true);
-        setRiskLevel(prefs.riskLevel ?? 'medium');
-        setGasOptimization(prefs.gasOptimization ?? true);
+        setAutoTopupEnabled(prefs.autoTopupEnabled ?? DEFAULT_PREFERENCES.autoTopupEnabled);
+        setNotificationsEnabled(prefs.notificationsEnabled ?? DEFAULT_PREFERENCES.notificationsEnabled);
+        setRiskLevel(prefs.riskLevel ?? DEFAULT_PREFERENCES.riskLevel);
+        setGasOptimization(prefs.gasOptimization ?? DEFAULT_PREFERENCES.gasOptimization);
       }
-      
+
     } catch (err) {
       console.error('Failed to load user configuration:', err);
       setError('Failed to load configuration');
@@ -106,6 +117,18 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
   const saveUserConfiguration = useCallback(async () => {
     if (!walletAddress) {
       setError('Please connect your wallet first');
+      return;
+    }
+
+    const validationError = validateSettings({
+      threshold,
+      target,
+      cooldown: Number(cooldown),
+      maxDaily: Number(maxDaily),
+    });
+    if (validationError) {
+      setError(validationError);
+      setSuccess(null);
       return;
     }
 
@@ -134,7 +157,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         });
       });
 
-      // Save user preferences
+      // Save user preferences on the worker (per user, survives the browser)
       const userPrefs = {
         autoTopupEnabled,
         notificationsEnabled,
@@ -142,6 +165,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         gasOptimization,
         lastUpdated: Date.now(),
       };
+      await savePreferences(walletAddress, userPrefs);
       localStorage.setItem(`user-config-${walletAddress}`, JSON.stringify(userPrefs));
 
       setSuccess('Configuration saved successfully');
@@ -165,18 +189,19 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
     gasOptimization,
     createSubAccount,
     updateSubAccount,
+    savePreferences,
     onConfigurationChange,
   ]);
 
   const resetToDefaults = () => {
-    setThreshold('0.01');
-    setTarget('0.05');
-    setCooldown('300');
-    setMaxDaily('10');
-    setAutoTopupEnabled(true);
-    setNotificationsEnabled(true);
-    setRiskLevel('medium');
-    setGasOptimization(true);
+    setThreshold(DEFAULT_SETTINGS.threshold);
+    setTarget(DEFAULT_SETTINGS.target);
+    setCooldown(String(DEFAULT_SETTINGS.cooldown));
+    setMaxDaily(String(DEFAULT_SETTINGS.maxDaily));
+    setAutoTopupEnabled(DEFAULT_PREFERENCES.autoTopupEnabled);
+    setNotificationsEnabled(DEFAULT_PREFERENCES.notificationsEnabled);
+    setRiskLevel(DEFAULT_PREFERENCES.riskLevel);
+    setGasOptimization(DEFAULT_PREFERENCES.gasOptimization);
   };
 
   const formatBalance = (value: string) => {
@@ -216,7 +241,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                 inputMode="decimal"
                 value={threshold}
                 onChange={(e) => setThreshold(e.target.value)}
-                placeholder="0.01"
+                placeholder={DEFAULT_SETTINGS.threshold}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
               <p className="text-xs text-gray-500 mt-1">Auto-topup triggers when balance falls below this amount</p>
@@ -229,7 +254,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                 inputMode="decimal"
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
-                placeholder="0.05"
+                placeholder={DEFAULT_SETTINGS.target}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
               <p className="text-xs text-gray-500 mt-1">Refill amount to restore balance to this level</p>
@@ -239,7 +264,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
               <label className="block text-xs text-gray-600 mb-1">Cooldown (seconds)</label>
               <input
                 type="number"
-                min={300}
+                min={SET_FORGET_BOUNDS.minCooldownSeconds}
                 value={cooldown}
                 onChange={(e) => setCooldown(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
@@ -252,7 +277,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
               <input
                 type="number"
                 min={1}
-                max={100}
+                max={SET_FORGET_BOUNDS.maxDaily}
                 value={maxDaily}
                 onChange={(e) => setMaxDaily(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
@@ -299,7 +324,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
               <label className="block text-xs text-gray-600 mb-1">Risk Level</label>
               <select
                 value={riskLevel}
-                onChange={(e) => setRiskLevel(e.target.value)}
+                onChange={(e) => setRiskLevel(e.target.value as RiskLevel)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
               >
                 <option value="low">Low - Conservative refilling</option>

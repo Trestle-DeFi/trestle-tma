@@ -24,12 +24,17 @@ contract TrestleMainVault is AbstractCallback, Ownable, ReentrancyGuard {
 
     mapping(bytes32 => TopUpRequest) public requests;
     mapping(address => bytes32[]) public subAccountRequests;
+    mapping(address => uint64) public subAccountDailyLimit;
+    mapping(address => uint64) public dailyRequestCount;
+    mapping(address => uint256) public dailyRequestDay;
 
     uint256 public constant REQUEST_EXPIRY_TIME = 3600;
-    uint64 public constant MAX_DAILY_REQUESTS = 10;
+    uint64 public constant DEFAULT_MAX_DAILY_REQUESTS = 10;
     uint256 public constant MIN_TOPUP_AMOUNT = 1e15;
     uint256 public constant BRIDGE_FUNDING_BUFFER_BPS = 100;
     uint256 public constant ORIGIN_CHAIN_ID = 1301;
+
+    uint64 public defaultMaxDailyRequests = DEFAULT_MAX_DAILY_REQUESTS;
 
     mapping(address => bool) public authorizedCallers;
     ITopupBridge public topupBridge;
@@ -39,6 +44,7 @@ contract TrestleMainVault is AbstractCallback, Ownable, ReentrancyGuard {
     event TopUpFailed(bytes32 indexed requestId, address indexed subAccount, string reason);
     event TopUpExpired(bytes32 indexed requestId, address indexed subAccount);
     event BridgeConfigured(address indexed bridge);
+    event DailyRequestLimitUpdated(address indexed subAccount, uint64 limit);
 
     constructor(IPayable callbackProxy_, address reactiveSender_)
         payable
@@ -61,6 +67,7 @@ contract TrestleMainVault is AbstractCallback, Ownable, ReentrancyGuard {
 
     function requestTopUp(address subAccount, uint64 sequence, uint256 amount) external onlyAuthorizedCaller {
         require(amount >= MIN_TOPUP_AMOUNT, "Amount too small");
+        _consumeDailyRequest(subAccount);
         bytes32 requestId = keccak256(abi.encode(ORIGIN_CHAIN_ID, subAccount, sequence));
         require(requests[requestId].requestId == bytes32(0), "Request exists");
         requests[requestId] = TopUpRequest({
@@ -72,8 +79,40 @@ contract TrestleMainVault is AbstractCallback, Ownable, ReentrancyGuard {
             expired: false
         });
         subAccountRequests[subAccount].push(requestId);
-        require(subAccountRequests[subAccount].length <= MAX_DAILY_REQUESTS, "Daily request limit exceeded");
         emit TopUpRequested(requestId, subAccount, amount);
+    }
+
+    function setSubAccountDailyLimit(address subAccount, uint64 limit) external onlyOwner {
+        require(limit > 0, "Invalid daily request limit");
+        subAccountDailyLimit[subAccount] = limit;
+        emit DailyRequestLimitUpdated(subAccount, limit);
+    }
+
+    function setDefaultMaxDailyRequests(uint64 limit) external onlyOwner {
+        require(limit > 0, "Invalid daily request limit");
+        defaultMaxDailyRequests = limit;
+        emit DailyRequestLimitUpdated(address(0), limit);
+    }
+
+    function getDailyRequestCount(address subAccount) external view returns (uint64 count, uint256 day) {
+        return (dailyRequestCount[subAccount], dailyRequestDay[subAccount]);
+    }
+
+    function getEffectiveDailyLimit(address subAccount) external view returns (uint64) {
+        uint64 limit = subAccountDailyLimit[subAccount];
+        return limit == 0 ? defaultMaxDailyRequests : limit;
+    }
+
+    function _consumeDailyRequest(address subAccount) internal {
+        uint256 day = block.timestamp / 86400;
+        if (dailyRequestDay[subAccount] != day) {
+            dailyRequestDay[subAccount] = day;
+            dailyRequestCount[subAccount] = 0;
+        }
+        uint64 limit = subAccountDailyLimit[subAccount];
+        if (limit == 0) limit = defaultMaxDailyRequests;
+        require(dailyRequestCount[subAccount] < limit, "Daily request limit exceeded");
+        dailyRequestCount[subAccount]++;
     }
 
     function setTopupBridge(address bridge) external onlyOwner {
@@ -103,6 +142,7 @@ contract TrestleMainVault is AbstractCallback, Ownable, ReentrancyGuard {
 
         TopUpRequest storage request = requests[requestId];
         if (request.requestId == bytes32(0)) {
+            _consumeDailyRequest(subAccount);
             requests[requestId] = TopUpRequest({
                 requestId: requestId,
                 subAccount: subAccount,
@@ -112,7 +152,6 @@ contract TrestleMainVault is AbstractCallback, Ownable, ReentrancyGuard {
                 expired: false
             });
             subAccountRequests[subAccount].push(requestId);
-            require(subAccountRequests[subAccount].length <= MAX_DAILY_REQUESTS, "Daily request limit exceeded");
         } else {
             require(!request.settled, "Request settled");
             require(!request.expired, "Request expired");
