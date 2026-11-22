@@ -371,26 +371,61 @@ export async function saveUserPreferences(db, preferences) {
   if (!preferences?.userAddress) {
     throw new ValidationError("userAddress is required");
   }
+
   const riskLevel = preferences.riskLevel ?? "medium";
   if (!["low", "medium", "high"].includes(riskLevel)) {
     throw new ValidationError("riskLevel must be low, medium or high");
   }
 
   return withPluginSchema(db, async () => {
+    const existing = await db.prepare(
+      "SELECT * FROM user_preferences WHERE user_address = ?"
+    ).bind(preferences.userAddress).first();
+
+    const autoTopupEnabled =
+      preferences.autoTopupEnabled ?? (existing ? Boolean(existing.auto_topup_enabled) : true);
+    const notificationsEnabled =
+      preferences.notificationsEnabled ?? (existing ? Boolean(existing.notifications_enabled) : true);
+    const gasOptimization =
+      preferences.gasOptimization ?? (existing ? Boolean(existing.gas_optimization) : true);
+
     const now = Math.floor(Date.now() / 1000);
-    
+
     await db.prepare(
-      "INSERT OR REPLACE INTO user_preferences (user_address, auto_topup_enabled, notifications_enabled, risk_level, gas_optimization, last_updated) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO user_preferences (user_address, auto_topup_enabled, notifications_enabled, risk_level, gas_optimization, last_updated) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_address) DO UPDATE SET auto_topup_enabled=excluded.auto_topup_enabled, notifications_enabled=excluded.notifications_enabled, risk_level=excluded.risk_level, gas_optimization=excluded.gas_optimization, last_updated=excluded.last_updated"
     ).bind(
       preferences.userAddress,
-      preferences.autoTopupEnabled ? 1 : 0,
-      preferences.notificationsEnabled ? 1 : 0,
+      autoTopupEnabled ? 1 : 0,
+      notificationsEnabled ? 1 : 0,
       riskLevel,
-      preferences.gasOptimization ? 1 : 0,
+      gasOptimization ? 1 : 0,
       now
     ).run();
-    
-    return { ...preferences, riskLevel, lastUpdated: now };
+
+    // Log changes for audit trail
+    const prev = existing
+      ? {
+          autoTopupEnabled: Boolean(existing.auto_topup_enabled),
+          notificationsEnabled: Boolean(existing.notifications_enabled),
+          riskLevel: existing.risk_level,
+          gasOptimization: Boolean(existing.gas_optimization),
+        }
+      : {};
+    const next = { autoTopupEnabled, notificationsEnabled, riskLevel, gasOptimization };
+    for (const key of Object.keys(next)) {
+      if (String(prev[key] ?? "") !== String(next[key])) {
+        await logConfigurationChange(db, preferences.userAddress, key, prev[key], next[key]);
+      }
+    }
+
+    return {
+      userAddress: preferences.userAddress,
+      autoTopupEnabled,
+      notificationsEnabled,
+      riskLevel,
+      gasOptimization,
+      lastUpdated: now,
+    };
   });
 }
 
