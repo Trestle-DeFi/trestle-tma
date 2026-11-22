@@ -22,6 +22,7 @@ export const ConfigurationManager: React.FC = () => {
   const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'core' | 'advanced' | 'history'>('core');
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [showConfigurationPanel, setShowConfigurationPanel] = useState(false);
 
   const { fetchSubAccounts, updateSubAccount, deleteSubAccount } = useSubAccount();
@@ -55,15 +56,10 @@ export const ConfigurationManager: React.FC = () => {
         return;
       }
 
-      const savedPrefs = localStorage.getItem(`user-config-${walletAddress}`);
-      if (savedPrefs) {
-        setUserPreferences(JSON.parse(savedPrefs));
-      } else {
-        setUserPreferences({
-          ...DEFAULT_PREFERENCES,
-          lastUpdated: Date.now(),
-        });
-      }
+      setUserPreferences({
+        ...DEFAULT_PREFERENCES,
+        lastUpdated: Date.now(),
+      });
       
     } catch (error) {
       console.error('Failed to load user data:', error);
@@ -74,7 +70,10 @@ export const ConfigurationManager: React.FC = () => {
 
   useEffect(() => {
     if (activeTab === 'history' && walletAddress) {
-      loadHistory(walletAddress);
+      setHistoryError(null);
+      loadHistory(walletAddress).catch((e) => {
+        setHistoryError(e?.message || 'Failed to load history');
+      });
     }
   }, [activeTab, walletAddress]);
 
@@ -89,7 +88,6 @@ export const ConfigurationManager: React.FC = () => {
     } as UserPreferences;
     
     setUserPreferences(updatedPrefs);
-    localStorage.setItem(`user-config-${walletAddress}`, JSON.stringify(updatedPrefs));
     savePreferences(walletAddress, updatedPrefs).catch((error) => {
       console.error('Failed to persist preferences:', error);
     });
@@ -228,6 +226,10 @@ export const ConfigurationManager: React.FC = () => {
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold mb-4">Configuration History</h2>
+
+            {historyError && (
+              <p className="text-sm text-red-600 mb-4">{historyError}</p>
+            )}
 
             {!walletAddress ? (
               <p className="text-gray-500">Connect your wallet to view your configuration history.</p>

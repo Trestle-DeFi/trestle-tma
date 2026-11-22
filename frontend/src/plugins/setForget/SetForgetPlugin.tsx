@@ -124,8 +124,8 @@ const SetForgetPlugin: React.FC = () => {
   );
 
   const handleConfigurationChange = (config: any) => {
-    console.log('Configuration changed:', config);
-    // Handle configuration changes here
+    // Refresh sub-account list so UI reflects any threshold/target updates.
+    loadSubAccounts().catch((e) => console.error('Failed to refresh sub-accounts:', e));
   };
 
   const explorerFor = (chainId: number) =>

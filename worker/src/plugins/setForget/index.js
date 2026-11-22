@@ -23,9 +23,75 @@ import {
 import { writeLog } from "../../log.js";
 import { withPluginSchema } from "./schema.js";
 
+async function verifyTelegramInitData(initData, botToken) {
+  if (!initData || !botToken) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return null;
+  params.delete("hash");
+  const dataCheckString = [...params.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+  const encoder = new TextEncoder();
+  const secretKey = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode("WebAppData"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const secret = await crypto.subtle.sign("HMAC", secretKey, encoder.encode(botToken));
+  const key = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(dataCheckString));
+  const hex = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (hex !== hash) return null;
+  const userRaw = params.get("user");
+  if (!userRaw) return null;
+  try {
+    return JSON.parse(userRaw);
+  } catch {
+    return null;
+  }
+}
+
+
 const app = new Hono();
 
 app.use("*", cors());
+
+// Simple per-IP rate limiter for configuration endpoints (best-effort, per-isolate).
+const rateBuckets = new Map();
+app.use("/api/plugins/set-forget/configuration/*", async (c, next) => {
+  const ip = c.req.header("CF-Connecting-IP") || c.req.header("x-forwarded-for") || "unknown";
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 60;
+  const bucket = rateBuckets.get(ip) || { count: 0, reset: now + windowMs };
+  if (now > bucket.reset) {
+    bucket.count = 0;
+    bucket.reset = now + windowMs;
+  }
+  bucket.count += 1;
+  rateBuckets.set(ip, bucket);
+  if (bucket.count > max) {
+    return c.json({ error: "Too many requests" }, 429);
+  }
+  await next();
+});
+
+// Auth middleware for per-user configuration routes: verify Telegram initData
+// and derive identity from it (never trust a client-supplied address).
+app.use("/api/plugins/set-forget/configuration/*", async (c, next) => {
+  const initData =
+    c.req.header("X-Telegram-Init-Data") || c.req.query("initData");
+  const user = await verifyTelegramInitData(initData, c.env.TELEGRAM_BOT_TOKEN);
+  if (!user || !user.id) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  c.set("user", user);
+  await next();
+});
 
 function ensureInitialized(env) {
   if (env.SIGNER_PRIVATE_KEY) initSubAccountSigner(env.SIGNER_PRIVATE_KEY);
@@ -140,15 +206,10 @@ app.delete("/api/plugins/set-forget/subaccounts/:address", async (c) => {
 
 app.get("/api/plugins/set-forget/configuration/preferences", async (c) => {
   try {
-    const address = c.req.query("address");
-    if (!address) {
-      return c.json({ error: "address is required" }, 400);
-    }
-
+    const address = String(c.get("user").id);
     const preferences = await withPluginSchema(c.env.DB, () =>
       getUserPreferences(c.env.DB, address)
     );
-
     return c.json({ preferences });
   } catch (e) {
     await writeLog(c.env.DB, {
@@ -162,11 +223,8 @@ app.get("/api/plugins/set-forget/configuration/preferences", async (c) => {
 app.put("/api/plugins/set-forget/configuration/preferences", async (c) => {
   try {
     const body = await c.req.json();
-    const { userAddress, ...preferences } = body;
-
-    if (!userAddress) {
-      return c.json({ error: "userAddress is required" }, 400);
-    }
+    const { ...preferences } = body;
+    const userAddress = String(c.get("user").id);
 
     const saved = await withPluginSchema(c.env.DB, () =>
       saveUserPreferences(c.env.DB, { userAddress, ...preferences })
@@ -185,16 +243,11 @@ app.put("/api/plugins/set-forget/configuration/preferences", async (c) => {
 
 app.get("/api/plugins/set-forget/configuration/history", async (c) => {
   try {
-    const address = c.req.query("address");
-    if (!address) {
-      return c.json({ error: "address is required" }, 400);
-    }
-
+    const address = String(c.get("user").id);
     const limit = Number(c.req.query("limit") || 50);
     const history = await withPluginSchema(c.env.DB, () =>
       getUserConfigurationHistory(c.env.DB, address, limit)
     );
-
     return c.json({ history });
   } catch (e) {
     await writeLog(c.env.DB, {

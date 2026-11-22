@@ -50,7 +50,7 @@
   },
   "crossChainFlow": "Unichain Sepolia (SubAccount) -> Lasna Testnet (ReactiveGuard) -> Base Sepolia (MainVault)",
   "hackathon": "Reactive Omni Buildathon",
-  "version": "37",
+  "hackathonVersion": "37",
   "configuration": {
     "features": [
       "per-user-threshold-management",

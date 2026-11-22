@@ -43,8 +43,12 @@ export const useConfiguration = () => {
       }
 
       const merged = { ...DEFAULT_PREFERENCES, ...stored } as StoredPreferences;
-      setPreferences(merged);
-      return merged;
+      const validRisk = (['low','medium','high'] as const).includes(merged.riskLevel as any)
+        ? merged.riskLevel
+        : DEFAULT_PREFERENCES.riskLevel;
+      const validated = { ...merged, riskLevel: validRisk } as StoredPreferences;
+      setPreferences(validated);
+      return validated;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load preferences');
       setPreferences(null);

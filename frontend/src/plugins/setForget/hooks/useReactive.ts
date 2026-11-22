@@ -68,7 +68,7 @@ export const useReactive = () => {
 
   // Kept for API compatibility with the plugin UI — pulls current status from
   // the vault worker rather than creating anything.
-  const setupSubscription = useCallback(async () => {
+  const fetchReactiveStatus = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
@@ -126,7 +126,8 @@ export const useReactive = () => {
     status,
     isLoading,
     error,
-    setupSubscription,
+    fetchReactiveStatus,
+    setupSubscription: fetchReactiveStatus,
     getReactiveStatus,
     subscribeToEvents,
     refreshStatus,

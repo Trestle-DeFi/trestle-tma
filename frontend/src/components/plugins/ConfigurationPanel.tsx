@@ -96,15 +96,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         setGasOptimization(stored.gasOptimization);
         return;
       }
-
-      const savedPrefs = localStorage.getItem(`user-config-${address}`);
-      if (savedPrefs) {
-        const prefs = JSON.parse(savedPrefs);
-        setAutoTopupEnabled(prefs.autoTopupEnabled ?? DEFAULT_PREFERENCES.autoTopupEnabled);
-        setNotificationsEnabled(prefs.notificationsEnabled ?? DEFAULT_PREFERENCES.notificationsEnabled);
-        setRiskLevel(prefs.riskLevel ?? DEFAULT_PREFERENCES.riskLevel);
-        setGasOptimization(prefs.gasOptimization ?? DEFAULT_PREFERENCES.gasOptimization);
-      }
+      // No persisted preferences; keep defaults.
 
     } catch (err) {
       console.error('Failed to load user configuration:', err);
@@ -147,15 +139,18 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         maxDaily: Number(maxDaily),
       };
 
-      let subAccount = await createSubAccount(subAccountData).catch(async () => {
-        // If sub-account already exists, update it
-        return await updateSubAccount(walletAddress, {
+      // Atomic upsert: try update first; create only if it does not exist.
+      let subAccount;
+      try {
+        subAccount = await updateSubAccount(walletAddress, {
           threshold,
           target,
           cooldown: Number(cooldown),
           maxDaily: Number(maxDaily),
         });
-      });
+      } catch {
+        subAccount = await createSubAccount(subAccountData);
+      }
 
       // Save user preferences on the worker (per user, survives the browser)
       const userPrefs = {
@@ -166,7 +161,6 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         lastUpdated: Date.now(),
       };
       await savePreferences(walletAddress, userPrefs);
-      localStorage.setItem(`user-config-${walletAddress}`, JSON.stringify(userPrefs));
 
       setSuccess('Configuration saved successfully');
       onConfigurationChange?.(userPrefs);
@@ -366,7 +360,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
             Reset to Defaults
           </button>
           <button
-            onClick={() => setSuccess('Configuration preview feature coming soon!')}
+            onClick={() => setSuccess(`Preview: threshold=${threshold}, target=${target}, cooldown=${cooldown}s, maxDaily=${maxDaily}, autoTopup=${autoTopupEnabled}, notifications=${notificationsEnabled}, risk=${riskLevel}, gasOpt=${gasOptimization}`)}
             className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition"
           >
             Preview Configuration
