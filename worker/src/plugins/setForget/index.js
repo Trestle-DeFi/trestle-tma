@@ -213,7 +213,9 @@ app.delete("/api/plugins/set-forget/subaccounts/:address", async (c) => {
 
 app.get("/api/plugins/set-forget/configuration/preferences", async (c) => {
   try {
-    const address = String(c.get("user").id);
+    const address = c.env.TELEGRAM_BOT_TOKEN
+      ? String(c.get("user").id)
+      : (c.req.query("address") || String(c.get("user").id));
     const preferences = await withPluginSchema(c.env.DB, () =>
       getUserPreferences(c.env.DB, address)
     );
@@ -231,7 +233,9 @@ app.put("/api/plugins/set-forget/configuration/preferences", async (c) => {
   try {
     const body = await c.req.json();
     const { ...preferences } = body;
-    const userAddress = String(c.get("user").id);
+    const userAddress = c.env.TELEGRAM_BOT_TOKEN
+      ? String(c.get("user").id)
+      : (body.userAddress || String(c.get("user").id));
 
     const saved = await withPluginSchema(c.env.DB, () =>
       saveUserPreferences(c.env.DB, { ...preferences, userAddress })
@@ -250,7 +254,9 @@ app.put("/api/plugins/set-forget/configuration/preferences", async (c) => {
 
 app.get("/api/plugins/set-forget/configuration/history", async (c) => {
   try {
-    const address = String(c.get("user").id);
+    const address = c.env.TELEGRAM_BOT_TOKEN
+      ? String(c.get("user").id)
+      : (c.req.query("address") || String(c.get("user").id));
     const limit = Number(c.req.query("limit") || 50);
     const history = await withPluginSchema(c.env.DB, () =>
       getUserConfigurationHistory(c.env.DB, address, limit)
