@@ -234,7 +234,7 @@ app.put("/api/plugins/set-forget/configuration/preferences", async (c) => {
     const userAddress = String(c.get("user").id);
 
     const saved = await withPluginSchema(c.env.DB, () =>
-      saveUserPreferences(c.env.DB, { userAddress, ...preferences })
+      saveUserPreferences(c.env.DB, { ...preferences, userAddress })
     );
 
     return c.json({ preferences: saved });
