@@ -10,7 +10,8 @@ import { useReactive } from './hooks/useReactive';
 import SubAccountCard from './components/SubAccountCard';
 import { ConfigurationPanel } from '../../components/plugins/ConfigurationPanel';
 import { ConfigurationManager } from '../../components/plugins/ConfigurationManager';
-import { SET_FORGET_CONTRACTS, CHAIN_CONFIG } from '../../config/contracts';
+import { SET_FORGET_CONTRACTS, CHAIN_CONFIG, PLUGIN_API, VAULT_API } from '../../config/contracts';
+
 
 const NETWORK_FLOW = [
   {
@@ -95,7 +96,7 @@ const SetForgetPlugin: React.FC = () => {
   // `Subscriptions: 0` in the UI and the demo unable to fire.
   const ensureSubscriptions = useCallback(
     async (accounts: SubAccount[]) => {
-      const callbackUrl = `${window.location.origin}/api/plugins/set-forget/reactive/callback`;
+      const callbackUrl = `${PLUGIN_API}/api/plugins/set-forget/reactive/callback`;
       for (const account of accounts) {
         try {
           await subscribeToEvents(account.address, callbackUrl);
@@ -199,7 +200,7 @@ const SetForgetPlugin: React.FC = () => {
         // Also persist the subscription in the worker's D1 mirror.
         await subscribeToEvents(
           account.address,
-          `${window.location.origin}/api/plugins/set-forget/reactive/callback`
+          `${PLUGIN_API}/api/plugins/set-forget/reactive/callback`
         );
         setMessage(`Auto-topup activated for ${account.address}`);
       } catch (err: any) {

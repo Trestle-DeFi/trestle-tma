@@ -1,20 +1,23 @@
-import { http, fallback, defineChain } from "viem";
-import { polygon, polygonAmoy, baseSepolia, arbitrumSepolia, unichainSepolia } from "viem/chains";
-import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { createAppKit } from "@reown/appkit/react";
+import { http, fallback, defineChain } from 'viem';
+import { polygon, polygonAmoy, baseSepolia, arbitrumSepolia, unichainSepolia } from 'viem/chains';
+import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
+import { createAppKit } from '@reown/appkit/react';
 
 export const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID ?? "";
 
-// Lasna Testnet (Reactive Network) — custom chain, not bundled with viem
+// Lasna Testnet (Reactive Network) — custom chain, not bundled with viem.
+// Use Reown's defineChain + caip fields so it renders in the AppKit switcher.
 export const lasna = defineChain({
   id: 5318007,
-  name: "Lasna Testnet",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  caipNetworkId: 'eip155:5318007',
+  chainNamespace: 'eip155',
+  name: 'Lasna Testnet',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://lasna-rpc.rnk.dev/"] },
+    default: { http: ['https://lasna-rpc.rnk.dev/'] },
   },
   blockExplorers: {
-    default: { name: "Lasna Explorer", url: "https://lasna.reactscan.net" },
+    default: { name: 'Lasna Explorer', url: 'https://lasna.reactscan.net' },
   },
   testnet: true,
 });
