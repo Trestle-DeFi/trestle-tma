@@ -20,16 +20,16 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { keccak256, toHex } from "viem";
 
-// Live deployment (contracts/deployments/*.json, deployed 2026-11-18):
-//   TrestleSubAccount    0xf4Fef25b23171586E8C87994B8f3D1a3AfCe4c71  Unichain Sepolia (1301)
-//   TrestleReactiveGuard 0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3  Lasna (5318007)
-//   TrestleMainVault     0xd8FD13A95e54640206167d31bb39eF5FfF5dF231  Base Sepolia (84532)
-const GUARD_ADDRESS = "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3";
-const MAIN_VAULT = "0xd8FD13A95e54640206167d31bb39eF5FfF5dF231";
+// Live deployment (contracts/deployments/*.json, deployed 2026-11-23):
+//   TrestleSubAccount    0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4  Unichain Sepolia (1301)
+//   TrestleReactiveGuard 0xf22e65B24B3236B6B4983e81792541139Df6e3Dc  Lasna (5318007)
+//   TrestleMainVault     0xD403e50CDef51dfb048D0ff4773e85e724f614AD  Base Sepolia (84532)
+const GUARD_ADDRESS = "0xf22e65B24B3236B6B4983e81792541139Df6e3Dc";
+const MAIN_VAULT = "0xD403e50CDef51dfb048D0ff4773e85e724f614AD";
 // The guard keys subscriptions by the operator that spends from the
 // sub-account — that is the address holding the live on-chain subscription.
-const SUB_ACCOUNT = "0x9280b24542a52cEE54a78dB65A497D8BeC4BAB94";
-const ORIGIN_CONTRACT = "0xf4Fef25b23171586E8C87994B8f3D1a3AfCe4c71";
+const SUB_ACCOUNT = "0xE28D13B33C8E2aBF181A950072d64A486f7423eb";
+const ORIGIN_CONTRACT = "0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4";
 const ORIGIN_CHAIN_ID = 1301;
 const LOW_BALANCE_TOPIC =
   "0x51ade1b66b4d8c165822344a89904b54817158763b47b9faacee15c7645199ec";
