@@ -5,12 +5,13 @@ interface SubAccountCardProps {
   account: SubAccount;
   onUpdate: (address: string, updates: Partial<SubAccount>) => void;
   onDelete: (address: string) => void;
+  onActivate?: (account: SubAccount) => void;
 }
 
 const short = (addr: string) =>
   addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '—';
 
-const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDelete }) => {
+const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDelete, onActivate }) => {
   const formatBalance = (balance: string) => {
     const num = parseFloat(balance);
     if (!Number.isFinite(num)) return '0';
@@ -52,6 +53,14 @@ const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDe
           >
             Delete
           </button>
+          {onActivate && (
+            <button
+              onClick={() => onActivate(account)}
+              className="text-[11px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition"
+            >
+              Activate Auto-Topup
+            </button>
+          )}
         </div>
       </div>
 

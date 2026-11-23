@@ -1,9 +1,9 @@
 {
   "network": "unichainSepolia",
   "contract": "TrestleSubAccount",
-  "address": "0xf4Fef25b23171586E8C87994B8f3D1a3AfCe4c71",
+  "address": "0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4",
   "deployer": "0x9280b24542a52cEE54a78dB65A497D8BeC4BAB94",
   "constructorArgs": [],
-  "timestamp": "2026-11-20T14:55:23.022Z",
-  "txHash": "0x1a64b011c6448844872fb8b8b8bc860061130bc3be8906fc240f3ad964665e34"
+  "timestamp": "2026-11-23T02:51:06.371Z",
+  "txHash": "0x71939a0b652632e0b5ec8a672b57cb999be37745c4e58f503324eab46e7b96fb"
 }

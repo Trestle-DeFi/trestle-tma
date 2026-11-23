@@ -19,6 +19,7 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
 
     struct SubAccountConfig {
         address mainVault;
+        address owner;
         uint256 threshold;
         uint256 target;
         uint64 cooldown;
@@ -82,6 +83,7 @@ contract TrestleSubAccount is Ownable, ReentrancyGuard {
 
         subAccounts[msg.sender] = SubAccountConfig({
             mainVault: _mainVault,
+            owner: msg.sender,
             threshold: _threshold,
             target: _target,
             cooldown: _cooldown,

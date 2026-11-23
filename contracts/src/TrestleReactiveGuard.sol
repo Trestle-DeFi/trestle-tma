@@ -36,8 +36,10 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
     address public callbackRecipient;
     mapping(address => Subscription) public subscriptions;
     mapping(bytes32 => bool) public processedEvents;
+    mapping(address => address) public subAccountOwners;
 
     event SubscriptionCreated(address indexed subAccount, uint64 maxDailyRefills, uint256 timestamp);
+    event SubAccountRegistered(address indexed subAccount, address indexed owner, uint256 timestamp);
     event TopupCallbackRequested(
         bytes32 indexed requestId,
         address indexed subAccount,
@@ -75,7 +77,17 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
         emit MaxDailyRefillsLimitUpdated(limit);
     }
 
-    function setupSubscription(address subAccount, uint64 maxDailyRefills) external onlyOwner {
+    function registerSubAccount(address subAccount) external {
+        require(subAccount != address(0), "Invalid sub-account");
+        require(subAccountOwners[subAccount] == address(0), "Sub-account already registered");
+        subAccountOwners[subAccount] = msg.sender;
+        emit SubAccountRegistered(subAccount, msg.sender, block.timestamp);
+    }
+
+    function setupSubscription(address subAccount, uint64 maxDailyRefills) external {
+        address subOwner = subAccountOwners[subAccount];
+        require(subOwner != address(0), "Sub-account not registered");
+        require(subOwner == msg.sender || msg.sender == owner(), "Not sub-account owner nor contract owner");
         require(!subscriptions[subAccount].isActive, "Subscription exists");
         require(maxDailyRefills > 0 && maxDailyRefills <= maxDailyRefillsLimit, "Invalid max daily refills");
 
@@ -93,7 +105,10 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
         emit SubscriptionCreated(subAccount, maxDailyRefills, block.timestamp);
     }
 
-    function updateSubscription(address subAccount, bool isActive, uint64 newMaxDailyRefills) external onlyOwner {
+    function updateSubscription(address subAccount, bool isActive, uint64 newMaxDailyRefills) external {
+        address subOwner = subAccountOwners[subAccount];
+        require(subOwner != address(0), "Sub-account not registered");
+        require(subOwner == msg.sender || msg.sender == owner(), "Not sub-account owner nor contract owner");
         require(
             subscriptions[subAccount].isActive != isActive
                 || subscriptions[subAccount].maxDailyRefills != newMaxDailyRefills,

@@ -124,19 +124,19 @@ export const CONTRACT_ADDRESSES: Record<number, Record<ContractName, `0x${string
 export const SET_FORGET_CONTRACTS = {
   mainVault: {
     chainId: 84532,
-    address: "0xd8FD13A95e54640206167d31bb39eF5FfF5dF231",
+    address: "0xD403e50CDef51dfb048D0ff4773e85e724f614AD",
     name: "TrestleMainVault",
     role: "origin",
   },
   subAccount: {
     chainId: 1301,
-    address: "0xf4Fef25b23171586E8C87994B8f3D1a3AfCe4c71",
+    address: "0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4",
     name: "TrestleSubAccount",
     role: "destination",
   },
   reactiveGuard: {
     chainId: 5318007,
-    address: "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3",
+    address: "0xf22e65B24B3236B6B4983e81792541139Df6e3Dc",
     name: "TrestleReactiveGuard",
     role: "reactive",
   },

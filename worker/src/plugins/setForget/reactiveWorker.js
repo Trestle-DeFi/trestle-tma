@@ -2,7 +2,7 @@ import { createPublicClient, http, keccak256, toHex } from "viem";
 
 // ─── On-chain configuration ────────────────────────────────────────────────
 // ReactiveGuard lives on Lasna (Reactive Network testnet, chainId 5318007).
-export const DEFAULT_GUARD_ADDRESS = "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3";
+export const DEFAULT_GUARD_ADDRESS = "0xf22e65B24B3236B6B4983e81792541139Df6e3Dc";
 export const DEFAULT_LASNA_RPC = "https://lasna-rpc.rnk.dev/";
 
 // topic0 of the origin-chain event the guard reacts to:

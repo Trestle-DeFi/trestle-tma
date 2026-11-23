@@ -20,7 +20,7 @@
       "chainId": 84532,
       "rpcUrl": "https://sepolia.base.org",
       "contract": "TrestleMainVault",
-      "contractAddress": "0xd8FD13A95e54640206167d31bb39eF5FfF5dF231",
+      "contractAddress": "0xD403e50CDef51dfb048D0ff4773e85e724f614AD",
       "explorer": "https://sepolia.basescan.org",
       "role": "origin",
       "purpose": "Main vault for reserve funds"
@@ -29,7 +29,7 @@
       "chainId": 1301,
       "rpcUrl": "https://sepolia.unichain.org",
       "contract": "TrestleSubAccount",
-      "contractAddress": "0xf4Fef25b23171586E8C87994B8f3D1a3AfCe4c71",
+      "contractAddress": "0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4",
       "explorer": "https://unichain-sepolia.blockscout.com",
       "role": "destination",
       "purpose": "Operational sub-account for escrows"
@@ -38,7 +38,7 @@
       "chainId": 5318007,
       "rpcUrl": "https://lasna-rpc.rnk.dev/",
       "contract": "TrestleReactiveGuard",
-      "contractAddress": "0x27fcAdD5142ECB1b6FC13314a2bDfB71dC92CeF3",
+      "contractAddress": "0xf22e65B24B3236B6B4983e81792541139Df6e3Dc",
       "explorer": "https://lasna.reactscan.net",
       "role": "reactive",
       "purpose": "Reactive subscription and callback triggering"

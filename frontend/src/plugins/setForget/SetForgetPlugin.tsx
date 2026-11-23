@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAccount } from 'wagmi';
+import { useAccount, useSwitchChain, useWriteContract } from 'wagmi';
 import {
   useSubAccount,
   SubAccount,
@@ -41,12 +41,36 @@ const EMPTY_FORM = {
   maxDaily: '10',
 };
 
+// Reactive Guard on Lasna — per-user auto-topup subscription.
+const LASNA_CHAIN_ID = SET_FORGET_CONTRACTS.reactiveGuard.chainId;
+const GUARD_ADDRESS = SET_FORGET_CONTRACTS.reactiveGuard.address;
+const GUARD_ABI = [
+  {
+    type: 'function',
+    name: 'registerSubAccount',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'subAccount', type: 'address' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'setupSubscription',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'subAccount', type: 'address' },
+      { name: 'maxDailyRefills', type: 'uint64' },
+    ],
+    outputs: [],
+  },
+] as const;
+
 const SetForgetPlugin: React.FC = () => {
   const { address: walletAddress } = useAccount();
   const [subAccounts, setSubAccounts] = useState<SubAccount[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showConfigurationPanel, setShowConfigurationPanel] = useState(false);
   const [activeTab, setActiveTab] = useState<'subaccounts' | 'configuration'>('subaccounts');
+  const [message, setMessage] = useState<string | null>(null);
 
   // Form state for creating sub-accounts
   const [showForm, setShowForm] = useState(false);
@@ -60,7 +84,28 @@ const SetForgetPlugin: React.FC = () => {
     updateSubAccount,
     deleteSubAccount,
   } = useSubAccount();
-  const { status: reactiveStatus, setupSubscription } = useReactive();
+  const { status: reactiveStatus, setupSubscription, subscribeToEvents } = useReactive();
+
+  const { switchChainAsync } = useSwitchChain();
+  const { writeContractAsync } = useWriteContract();
+
+  // Ensure every operational sub-account has a reactive subscription so the
+  // guard begins watching its LowBalanceDetected events. Previously this was
+  // never called (setupSubscription only fetched status), which left
+  // `Subscriptions: 0` in the UI and the demo unable to fire.
+  const ensureSubscriptions = useCallback(
+    async (accounts: SubAccount[]) => {
+      const callbackUrl = `${window.location.origin}/api/plugins/set-forget/reactive/callback`;
+      for (const account of accounts) {
+        try {
+          await subscribeToEvents(account.address, callbackUrl);
+        } catch (error) {
+          console.error(`Failed to subscribe sub-account ${account.address}:`, error);
+        }
+      }
+    },
+    [subscribeToEvents]
+  );
 
   // Default the sub-account address to the connected wallet.
   useEffect(() => {
@@ -70,8 +115,13 @@ const SetForgetPlugin: React.FC = () => {
   }, [walletAddress]);
 
   useEffect(() => {
-    loadSubAccounts();
-    loadReactiveStatus();
+    (async () => {
+      const data = await loadSubAccounts();
+      await loadReactiveStatus();
+      if (data?.length) {
+        await ensureSubscriptions(data);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -80,6 +130,7 @@ const SetForgetPlugin: React.FC = () => {
       setIsLoading(true);
       const data = await fetchSubAccountsFn();
       setSubAccounts(data);
+      return data;
     } catch (error) {
       console.error('Failed to load sub-accounts:', error);
     } finally {
@@ -100,9 +151,11 @@ const SetForgetPlugin: React.FC = () => {
     async (subAccountData: CreateSubAccountData) => {
       const newSubAccount = await createSubAccount(subAccountData);
       setSubAccounts(prev => [...prev, newSubAccount]);
+      // Also subscribe the new sub-account to reactive events.
+      await ensureSubscriptions([newSubAccount]);
       return newSubAccount;
     },
-    [createSubAccount]
+    [createSubAccount, ensureSubscriptions]
   );
 
   const handleUpdateSubAccount = useCallback(
@@ -121,6 +174,39 @@ const SetForgetPlugin: React.FC = () => {
       setSubAccounts(prev => prev.filter(acc => acc.address !== address));
     },
     [deleteSubAccount]
+  );
+
+  const handleActivate = useCallback(
+    async (account: SubAccount) => {
+      try {
+        // Ensure we are on Lasna (Reactive Network testnet).
+        await switchChainAsync({ chainId: LASNA_CHAIN_ID });
+        // Register the caller as the owner of this sub-account on the guard.
+        await writeContractAsync({
+          abi: GUARD_ABI,
+          address: GUARD_ADDRESS,
+          functionName: 'registerSubAccount',
+          args: [account.address as `0x${string}`],
+        });
+        // Activate the auto-topup subscription with the user's max-daily setting.
+        const maxDailyRefills = account.maxDaily || 10;
+        await writeContractAsync({
+          abi: GUARD_ABI,
+          address: GUARD_ADDRESS,
+          functionName: 'setupSubscription',
+          args: [account.address as `0x${string}`, BigInt(maxDailyRefills)],
+        });
+        // Also persist the subscription in the worker's D1 mirror.
+        await subscribeToEvents(
+          account.address,
+          `${window.location.origin}/api/plugins/set-forget/reactive/callback`
+        );
+        setMessage(`Auto-topup activated for ${account.address}`);
+      } catch (err: any) {
+        setMessage(err?.message || 'Failed to activate auto-topup');
+      }
+    },
+    [switchChainAsync, writeContractAsync, subscribeToEvents]
   );
 
   const handleConfigurationChange = (config: any) => {
@@ -385,6 +471,7 @@ const SetForgetPlugin: React.FC = () => {
                     account={account}
                     onUpdate={handleUpdateSubAccount}
                     onDelete={handleDeleteSubAccount}
+                    onActivate={handleActivate}
                   />
                 ))}
               </div>
