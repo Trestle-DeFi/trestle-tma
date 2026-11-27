@@ -12,6 +12,7 @@ import {
 } from '../../plugins/setForget/config';
 import SubAccountCard from '../../plugins/setForget/components/SubAccountCard';
 import { SET_FORGET_CONTRACTS, CHAIN_CONFIG } from '../../config/contracts';
+import { useOnchain } from '../../plugins/setForget/hooks/useOnchain';
 
 const NETWORK_FLOW = [
   {
@@ -48,6 +49,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [onchainNote, setOnchainNote] = useState<string | null>(null);
 
   const [threshold, setThreshold] = useState(DEFAULT_SETTINGS.threshold);
   const [target, setTarget] = useState(DEFAULT_SETTINGS.target);
@@ -61,6 +63,18 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
   const { fetchSubAccounts, createSubAccount, updateSubAccount } = useSubAccount();
   const { status: reactiveStatus } = useReactive();
   const { loadPreferences, savePreferences } = useConfiguration();
+  // On-chain self-service actions. The contracts are what actually drive the
+  // auto-topup, so the user's own wallet writes them; no protocol owner
+  // transaction is involved in any step below.
+  const {
+    createSubAccount: createSubAccountOnchain,
+    updateSubAccountConfig,
+    setDailyRequestLimit,
+    updateSelfSubscription,
+    subscribeSelf,
+    refresh: refreshOnchainState,
+    formatEth,
+  } = useOnchain();
 
   useEffect(() => {
     if (userAddress) {
@@ -84,6 +98,21 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         setTarget(userSubAccount.target);
         setCooldown(userSubAccount.cooldown.toString());
         setMaxDaily(userSubAccount.maxDaily.toString());
+      }
+
+      // The on-chain registry is the source of truth for what drives the
+      // auto-topup, so its values win over the off-chain mirror. This is a
+      // plain read of the user's own sub-account.
+      try {
+        const chainState = await refreshOnchainState();
+        if (chainState.hasSubAccount) {
+          setThreshold(formatEth(chainState.threshold));
+          setTarget(formatEth(chainState.target));
+          if (chainState.cooldown > 0) setCooldown(String(chainState.cooldown));
+          if (chainState.maxDaily > 0) setMaxDaily(String(chainState.maxDaily));
+        }
+      } catch (err) {
+        console.error('Failed to read on-chain configuration:', err);
       }
 
       // Per-user preferences live on the worker; the browser copy is only a
@@ -129,7 +158,68 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
       setError(null);
       setSuccess(null);
 
-      // Save sub-account configuration
+      // ── 1. On-chain first ────────────────────────────────────────────────
+      // The contracts are what actually drive the auto-topup, so the user's
+      // own wallet writes them. Every call below is self-service: the
+      // registry only accepts the caller for their own sub-account, the vault
+      // only accepts the caller for their own cap, and the guard only accepts
+      // the subscription owner. No protocol owner transaction is involved.
+      const chainState = await refreshOnchainState().catch((err) => {
+        // A lagging or unreachable RPC must not block the write: the update
+        // itself is the source of truth, so fall back to trying the update.
+        console.error('Failed to read on-chain state, attempting the write anyway:', err);
+        return null;
+      });
+      const dailyCap = Number(maxDaily);
+
+      // Update the registry first. If the user has no sub-account yet the
+      // contract rejects the update, and the account is created instead.
+      try {
+        await updateSubAccountConfig({
+          threshold,
+          target,
+          cooldown: Number(cooldown),
+          maxDaily: dailyCap,
+        });
+      } catch (err: any) {
+        const reason = String(err?.shortMessage ?? err?.message ?? err);
+        if (!reason.includes('Sub-account not active')) throw err;
+        await createSubAccountOnchain({
+          threshold,
+          target,
+          cooldown: Number(cooldown),
+          maxDaily: dailyCap,
+        });
+      }
+
+      // The vault-side cap on top-up requests is the user's own.
+      await setDailyRequestLimit(dailyCap);
+
+      // The guard subscription carries the user's cooldown and daily refill
+      // cap. Its active state is preserved, so saving settings never silently
+      // resumes a subscription the user paused.
+      if (chainState?.hasSubscription) {
+        try {
+          await updateSelfSubscription({
+            maxDaily: dailyCap,
+            cooldown: Number(cooldown),
+            isActive: chainState.subscriptionActive,
+          });
+        } catch (err: any) {
+          const reason = String(err?.shortMessage ?? err?.message ?? err);
+          // The guard reverts when nothing changes; that is a no-op, not a
+          // failure.
+          if (!reason.includes('No change needed')) throw err;
+        }
+      } else {
+        // No subscription yet (or the chain could not be read): register and
+        // open one for the user.
+        await subscribeSelf({ maxDaily: dailyCap, cooldown: Number(cooldown) });
+      }
+
+      // ── 2. Mirror into the worker's off-chain index ─────────────────────
+      // Create the sub-account; if it already exists the worker rejects the
+      // POST and the same values are written through the update route.
       const subAccountData = {
         address: walletAddress,
         mainVault: SET_FORGET_CONTRACTS.mainVault.address,
@@ -139,17 +229,16 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         maxDaily: Number(maxDaily),
       };
 
-      // Atomic upsert: try update first; create only if it does not exist.
       let subAccount;
       try {
+        subAccount = await createSubAccount(subAccountData);
+      } catch {
         subAccount = await updateSubAccount(walletAddress, {
           threshold,
           target,
           cooldown: Number(cooldown),
           maxDaily: Number(maxDaily),
         });
-      } catch {
-        subAccount = await createSubAccount(subAccountData);
       }
 
       // Save user preferences on the worker (per user, survives the browser)
@@ -160,10 +249,11 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         gasOptimization,
         lastUpdated: Date.now(),
       };
-      await savePreferences(walletAddress, userPrefs);
+      const savedPrefs = await savePreferences(walletAddress, userPrefs);
 
       setSuccess('Configuration saved successfully');
-      onConfigurationChange?.(userPrefs);
+      setOnchainNote('Saved on-chain (Unichain registry, Base vault, Lasna guard) and mirrored to the worker index.');
+      onConfigurationChange?.(savedPrefs);
 
     } catch (err) {
       console.error('Failed to save configuration:', err);
@@ -185,6 +275,12 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
     updateSubAccount,
     savePreferences,
     onConfigurationChange,
+    createSubAccountOnchain,
+    updateSubAccountConfig,
+    setDailyRequestLimit,
+    updateSelfSubscription,
+    subscribeSelf,
+    refreshOnchainState,
   ]);
 
   const resetToDefaults = () => {
@@ -220,6 +316,9 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         {success && (
           <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
             <p className="text-sm text-emerald-600">{success}</p>
+            {onchainNote && (
+              <p className="text-xs text-emerald-700 mt-1">{onchainNote}</p>
+            )}
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAccount, useSwitchChain, useWriteContract } from 'wagmi';
+import { useAccount } from 'wagmi';
 import {
   useSubAccount,
   SubAccount,
@@ -7,6 +7,7 @@ import {
   CreateSubAccountData,
 } from './hooks/useSubAccount';
 import { useReactive } from './hooks/useReactive';
+import { useOnchain, EMPTY_ONCHAIN_STATE, OnchainState } from './hooks/useOnchain';
 import SubAccountCard from './components/SubAccountCard';
 import { ConfigurationPanel } from '../../components/plugins/ConfigurationPanel';
 import { ConfigurationManager } from '../../components/plugins/ConfigurationManager';
@@ -42,29 +43,8 @@ const EMPTY_FORM = {
   maxDaily: '10',
 };
 
-// Reactive Guard on Lasna — per-user auto-topup subscription.
-const LASNA_CHAIN_ID = SET_FORGET_CONTRACTS.reactiveGuard.chainId;
-const GUARD_ADDRESS = SET_FORGET_CONTRACTS.reactiveGuard.address;
-const GUARD_ABI = [
-  {
-    type: 'function',
-    name: 'registerSubAccount',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'subAccount', type: 'address' }],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'setupSubscription',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'subAccount', type: 'address' },
-      { name: 'maxDailyRefills', type: 'uint64' },
-    ],
-    outputs: [],
-  },
-] as const;
-
+// The guard lives on Lasna and keys subscriptions by the USER's address — the
+// same address that emits LowBalanceDetected from the sub-account registry.
 const SetForgetPlugin: React.FC = () => {
   const { address: walletAddress } = useAccount();
   const [subAccounts, setSubAccounts] = useState<SubAccount[]>([]);
@@ -72,6 +52,12 @@ const SetForgetPlugin: React.FC = () => {
   const [showConfigurationPanel, setShowConfigurationPanel] = useState(false);
   const [activeTab, setActiveTab] = useState<'subaccounts' | 'configuration'>('subaccounts');
   const [message, setMessage] = useState<string | null>(null);
+
+  // Live on-chain state for the connected user (their own funds only).
+  const [onchain, setOnchain] = useState<OnchainState>(EMPTY_ONCHAIN_STATE);
+  const [isTxPending, setIsTxPending] = useState(false);
+  const [reserveAmount, setReserveAmount] = useState('0.01');
+  const [dailyCap, setDailyCap] = useState('10');
 
   // Form state for creating sub-accounts
   const [showForm, setShowForm] = useState(false);
@@ -86,9 +72,19 @@ const SetForgetPlugin: React.FC = () => {
     deleteSubAccount,
   } = useSubAccount();
   const { status: reactiveStatus, setupSubscription, subscribeToEvents } = useReactive();
-
-  const { switchChainAsync } = useSwitchChain();
-  const { writeContractAsync } = useWriteContract();
+  const {
+    createSubAccount: createSubAccountOnchain,
+    depositReserve,
+    withdrawReserve,
+    fundOperationalWallet,
+    withdrawOperational,
+    setDailyRequestLimit,
+    subscribeSelf,
+    pauseSelf,
+    resumeSelf,
+    refresh: refreshOnchainState,
+    formatEth,
+  } = useOnchain();
 
   // Ensure every operational sub-account has a reactive subscription so the
   // guard begins watching its LowBalanceDetected events. Previously this was
@@ -148,15 +144,51 @@ const SetForgetPlugin: React.FC = () => {
     }
   }, [setupSubscription]);
 
+  // Read the user's live on-chain state (their own reserve, sub-account and
+  // guard subscription) straight from the contracts.
+  const refreshOnchain = useCallback(async () => {
+    if (!walletAddress) {
+      setOnchain(EMPTY_ONCHAIN_STATE);
+      return;
+    }
+    try {
+      const state = await refreshOnchainState();
+      setOnchain(state);
+    } catch (error) {
+      console.error('Failed to read on-chain state:', error);
+    }
+  }, [walletAddress, refreshOnchainState]);
+
+  useEffect(() => {
+    refreshOnchain();
+  }, [refreshOnchain]);
+
   const handleCreateSubAccount = useCallback(
     async (subAccountData: CreateSubAccountData) => {
+      // The registry is the source of truth for the user's threshold/target
+      // and the source of the LowBalanceDetected events, so the on-chain
+      // creation happens first. It is permissionless and always keys the new
+      // sub-account to the connected wallet.
+      try {
+        await createSubAccountOnchain({
+          threshold: subAccountData.threshold,
+          target: subAccountData.target,
+          cooldown: subAccountData.cooldown ?? 300,
+          maxDaily: subAccountData.maxDaily ?? 10,
+        });
+      } catch (err: any) {
+        const reason = String(err?.shortMessage ?? err?.message ?? err);
+        // Already created on-chain — continue so the UI can be re-synced.
+        if (!reason.includes('Sub-account exists')) throw err;
+      }
       const newSubAccount = await createSubAccount(subAccountData);
       setSubAccounts(prev => [...prev, newSubAccount]);
       // Also subscribe the new sub-account to reactive events.
       await ensureSubscriptions([newSubAccount]);
+      await refreshOnchain();
       return newSubAccount;
     },
-    [createSubAccount, ensureSubscriptions]
+    [createSubAccountOnchain, createSubAccount, ensureSubscriptions, refreshOnchain]
   );
 
   const handleUpdateSubAccount = useCallback(
@@ -180,35 +212,157 @@ const SetForgetPlugin: React.FC = () => {
   const handleActivate = useCallback(
     async (account: SubAccount) => {
       try {
-        // Ensure we are on Lasna (Reactive Network testnet).
-        await switchChainAsync({ chainId: LASNA_CHAIN_ID });
-        // Register the caller as the owner of this sub-account on the guard.
-        await writeContractAsync({
-          abi: GUARD_ABI,
-          address: GUARD_ADDRESS,
-          functionName: 'registerSubAccount',
-          args: [account.address as `0x${string}`],
-        });
-        // Activate the auto-topup subscription with the user's max-daily setting.
+        setIsTxPending(true);
         const maxDailyRefills = account.maxDaily || 10;
-        await writeContractAsync({
-          abi: GUARD_ABI,
-          address: GUARD_ADDRESS,
-          functionName: 'setupSubscription',
-          args: [account.address as `0x${string}`, BigInt(maxDailyRefills)],
-        });
-        // Also persist the subscription in the worker's D1 mirror.
+        const cooldown = account.cooldown || 300;
+        // Self-service on Lasna: the user's own wallet registers on the guard
+        // and opens the subscription with their own cooldown and daily cap.
+        await subscribeSelf({ maxDaily: maxDailyRefills, cooldown });
+        // The vault-side cap is also the user's own daily request limit.
+        await setDailyRequestLimit(maxDailyRefills);
+        // Mirror the subscription in the worker's D1 index.
         await subscribeToEvents(
           account.address,
           `${PLUGIN_API}/api/plugins/set-forget/reactive/callback`
         );
         setMessage(`Auto-topup activated for ${account.address}`);
+        await refreshOnchain();
       } catch (err: any) {
-        setMessage(err?.message || 'Failed to activate auto-topup');
+        setMessage(err?.shortMessage || err?.message || 'Failed to activate auto-topup');
+      } finally {
+        setIsTxPending(false);
       }
     },
-    [switchChainAsync, writeContractAsync, subscribeToEvents]
+    [subscribeSelf, setDailyRequestLimit, subscribeToEvents, refreshOnchain]
   );
+
+  /** Pause the user's own subscription on the guard (their off switch). */
+  const handlePause = useCallback(
+    async (account: SubAccount) => {
+      try {
+        setIsTxPending(true);
+        await pauseSelf();
+        await handleUpdateSubAccount(account.address, { isActive: false });
+        setMessage(`Auto-topup paused for ${account.address}`);
+        await refreshOnchain();
+      } catch (err: any) {
+        setMessage(err?.shortMessage || err?.message || 'Failed to pause auto-topup');
+      } finally {
+        setIsTxPending(false);
+      }
+    },
+    [pauseSelf, handleUpdateSubAccount, refreshOnchain]
+  );
+
+  /** Resume the user's own subscription with their own settings. */
+  const handleResume = useCallback(
+    async (account: SubAccount) => {
+      try {
+        setIsTxPending(true);
+        await resumeSelf({
+          maxDaily: account.maxDaily || 10,
+          cooldown: account.cooldown || 300,
+        });
+        await handleUpdateSubAccount(account.address, { isActive: true });
+        setMessage(`Auto-topup resumed for ${account.address}`);
+        await refreshOnchain();
+      } catch (err: any) {
+        setMessage(err?.shortMessage || err?.message || 'Failed to resume auto-topup');
+      } finally {
+        setIsTxPending(false);
+      }
+    },
+    [resumeSelf, handleUpdateSubAccount, refreshOnchain]
+  );
+
+  /**
+   * Open the on-chain settings editor for one of the user's own sub-accounts.
+   * The editor writes the registry (threshold/target/cooldown/daily cap), the
+   * vault (daily request cap) and the guard subscription directly from the
+   * user's wallet — no protocol owner transaction is involved.
+   */
+  const handleEditSettings = useCallback((account: SubAccount) => {
+    setForm(prev => ({
+      ...prev,
+      address: account.address,
+      threshold: account.threshold,
+      target: account.target,
+      cooldown: String(account.cooldown),
+      maxDaily: String(account.maxDaily),
+    }));
+    setActiveTab('configuration');
+  }, []);
+
+  /** Fund the user's own reserve — the only source of top-up money. */
+  const handleDeposit = useCallback(async () => {
+    try {
+      setIsTxPending(true);
+      await depositReserve(reserveAmount);
+      setMessage(`Reserve topped up with ${reserveAmount} ETH`);
+      await refreshOnchain();
+    } catch (err: any) {
+      setMessage(err?.shortMessage || err?.message || 'Failed to deposit');
+    } finally {
+      setIsTxPending(false);
+    }
+  }, [depositReserve, reserveAmount, refreshOnchain]);
+
+  /** Withdraw the user's own unused reserve. */
+  const handleWithdraw = useCallback(async () => {
+    try {
+      setIsTxPending(true);
+      await withdrawReserve(reserveAmount);
+      setMessage(`Withdrew ${reserveAmount} ETH from your reserve`);
+      await refreshOnchain();
+    } catch (err: any) {
+      setMessage(err?.shortMessage || err?.message || 'Failed to withdraw');
+    } finally {
+      setIsTxPending(false);
+    }
+  }, [withdrawReserve, reserveAmount, refreshOnchain]);
+
+  /** Fund the user's own operational wallet on the Unichain registry. */
+  const handleFundOperational = useCallback(async () => {
+    try {
+      setIsTxPending(true);
+      await fundOperationalWallet(reserveAmount);
+      setMessage(`Operational wallet funded with ${reserveAmount} ETH`);
+      await refreshOnchain();
+    } catch (err: any) {
+      setMessage(err?.shortMessage || err?.message || 'Failed to fund the operational wallet');
+    } finally {
+      setIsTxPending(false);
+    }
+  }, [fundOperationalWallet, reserveAmount, refreshOnchain]);
+
+  /** Withdraw the user's own unspent operational balance. */
+  const handleWithdrawOperational = useCallback(async () => {
+    try {
+      setIsTxPending(true);
+      await withdrawOperational(reserveAmount);
+      setMessage(`Withdrew ${reserveAmount} ETH from your operational wallet`);
+      await refreshOnchain();
+    } catch (err: any) {
+      setMessage(err?.shortMessage || err?.message || 'Failed to withdraw');
+    } finally {
+      setIsTxPending(false);
+    }
+  }, [withdrawOperational, reserveAmount, refreshOnchain]);
+
+  /** Set the user's own daily top-up request cap. */
+  const handleSetDailyCap = useCallback(async () => {
+    try {
+      setIsTxPending(true);
+      const limit = parseInt(dailyCap, 10) || 10;
+      await setDailyRequestLimit(limit);
+      setMessage(`Daily top-up cap set to ${limit}`);
+      await refreshOnchain();
+    } catch (err: any) {
+      setMessage(err?.shortMessage || err?.message || 'Failed to set daily cap');
+    } finally {
+      setIsTxPending(false);
+    }
+  }, [setDailyRequestLimit, dailyCap, refreshOnchain]);
 
   const handleConfigurationChange = (config: any) => {
     // Refresh sub-account list so UI reflects any threshold/target updates.
@@ -238,7 +392,9 @@ const SetForgetPlugin: React.FC = () => {
       setIsSubmitting(true);
       setFormError(null);
       await handleCreateSubAccount({
-        address: form.address || walletAddress,
+        // Self-service: the sub-account always belongs to the connected
+        // wallet, both on-chain and in the worker's index.
+        address: walletAddress,
         mainVault: SET_FORGET_CONTRACTS.mainVault.address,
         threshold: form.threshold,
         target: form.target,
@@ -246,8 +402,8 @@ const SetForgetPlugin: React.FC = () => {
         maxDaily: parseInt(form.maxDaily, 10) || 10,
       });
       closeForm();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to create sub-account');
+    } catch (err: any) {
+      setFormError(err?.shortMessage || err?.message || 'Failed to create sub-account');
     } finally {
       setIsSubmitting(false);
     }
@@ -342,6 +498,133 @@ const SetForgetPlugin: React.FC = () => {
             )}
           </div>
 
+          {/* Your funds — self-service reserve on the Base vault */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-gray-700">Your Reserve</h3>
+              <button
+                onClick={refreshOnchain}
+                className="text-[11px] px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+              >
+                Refresh
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center mb-3">
+              <div className="rounded-lg bg-emerald-50 p-2">
+                <p className="text-lg font-bold text-emerald-600">
+                  {formatEth(onchain.reserveBalance)}
+                </p>
+                <p className="text-[10px] text-gray-500">Reserve (ETH)</p>
+              </div>
+              <div className="rounded-lg bg-blue-50 p-2">
+                <p className="text-lg font-bold text-blue-600">
+                  {formatEth(onchain.virtualBalance)}
+                </p>
+                <p className="text-[10px] text-gray-500">Operational (ETH)</p>
+              </div>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] mb-3">
+              <div className="flex justify-between gap-2">
+                <dt className="text-gray-500">Sub-account</dt>
+                <dd className="text-gray-700 font-medium">
+                  {onchain.hasSubAccount
+                    ? onchain.subAccountActive
+                      ? 'Active'
+                      : 'Inactive'
+                    : 'Not created'}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-gray-500">Subscription</dt>
+                <dd className="text-gray-700 font-medium">
+                  {onchain.subscriptionActive ? 'Active' : 'Paused'}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-gray-500">Daily cap</dt>
+                <dd className="text-gray-700 font-medium">{onchain.dailyLimit || '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-gray-500">Cooldown</dt>
+                <dd className="text-gray-700 font-medium">{onchain.cooldown ? `${onchain.cooldown}s` : '—'}</dd>
+              </div>
+            </dl>
+
+            <div className="flex gap-2 mb-2">
+              <div className="flex-1">
+                <label className="block text-[11px] text-gray-600 mb-1" htmlFor="sf-amount">
+                  Amount (ETH)
+                </label>
+                <input
+                  id="sf-amount"
+                  type="text"
+                  inputMode="decimal"
+                  value={reserveAmount}
+                  onChange={e => setReserveAmount(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+              </div>
+              <div className="flex items-end gap-1 flex-wrap">
+                <button
+                  onClick={handleDeposit}
+                  disabled={isTxPending || !walletAddress}
+                  className="text-xs px-3 py-1.5 bg-emerald-500 text-white rounded-lg font-medium hover:bg-emerald-600 transition disabled:opacity-50"
+                >
+                  Deposit reserve
+                </button>
+                <button
+                  onClick={handleWithdraw}
+                  disabled={isTxPending || !walletAddress}
+                  className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg font-medium hover:bg-gray-200 transition disabled:opacity-50"
+                >
+                  Withdraw reserve
+                </button>
+                <button
+                  onClick={handleFundOperational}
+                  disabled={isTxPending || !walletAddress}
+                  className="text-xs px-3 py-1.5 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition disabled:opacity-50"
+                >
+                  Fund operational
+                </button>
+                <button
+                  onClick={handleWithdrawOperational}
+                  disabled={isTxPending || !walletAddress}
+                  className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg font-medium hover:bg-gray-200 transition disabled:opacity-50"
+                >
+                  Withdraw operational
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <label className="block text-[11px] text-gray-600 mb-1" htmlFor="sf-dailycap">
+                  Daily top-up cap
+                </label>
+                <input
+                  id="sf-dailycap"
+                  type="number"
+                  min={1}
+                  value={dailyCap}
+                  onChange={e => setDailyCap(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                />
+              </div>
+              <button
+                onClick={handleSetDailyCap}
+                disabled={isTxPending || !walletAddress}
+                className="text-xs px-3 py-1.5 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition disabled:opacity-50"
+              >
+                Set cap
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-500 mt-2">
+              Every top-up is paid from your own reserve. The protocol holds no capital,
+              and only you can move your funds.
+            </p>
+            {message && <p className="text-xs text-emerald-700 mt-2">{message}</p>}
+          </div>
+
           {/* Sub-accounts */}
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <div className="flex items-center justify-between mb-3">
@@ -358,16 +641,19 @@ const SetForgetPlugin: React.FC = () => {
               <form onSubmit={handleSubmit} className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
                 <div>
                   <label className="block text-[11px] text-gray-600 mb-1" htmlFor="sf-address">
-                    Sub-Account Address
+                    Your Wallet (sub-account owner)
                   </label>
                   <input
                     id="sf-address"
                     type="text"
-                    value={form.address}
-                    onChange={e => setForm({ ...form, address: e.target.value })}
-                    placeholder="0x…"
-                    className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    readOnly
+                    value={walletAddress || 'Connect your wallet'}
+                    className="w-full rounded-lg border border-gray-300 bg-gray-100 px-2 py-1.5 text-xs font-mono text-gray-600 focus:outline-none"
                   />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    The sub-account is always created for your own wallet — no one
+                    else can create or claim one for you.
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -473,6 +759,9 @@ const SetForgetPlugin: React.FC = () => {
                     onUpdate={handleUpdateSubAccount}
                     onDelete={handleDeleteSubAccount}
                     onActivate={handleActivate}
+                    onPause={handlePause}
+                    onResume={handleResume}
+                    onEditSettings={handleEditSettings}
                   />
                 ))}
               </div>

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { formatEther } from "viem";
 import { ConfigurationPanel } from "./ConfigurationPanel";
+import { SET_FORGET_CONTRACTS } from "../../config/contracts";
 
 const mockPluginApi = vi.fn();
 const mockAccountState: { address?: string } = { address: undefined };
@@ -14,8 +16,28 @@ vi.mock("../../lib/plugin", () => ({
   pluginApi: (path: string, opts?: RequestInit) => mockPluginApi(path, opts),
 }));
 
+// The panel writes the user's settings straight to the contracts, so the
+// on-chain hook is mocked here. Every mock is a spy, which lets the tests
+// assert that the configuration is written on-chain — not only in the
+// worker's off-chain index.
+const mockOnchain = {
+  createSubAccount: vi.fn(),
+  updateSubAccountConfig: vi.fn(),
+  setDailyRequestLimit: vi.fn(),
+  updateSelfSubscription: vi.fn(),
+  subscribeSelf: vi.fn(),
+  refresh: vi.fn(),
+  formatEth: vi.fn((wei: bigint) => String(wei)),
+};
+
+vi.mock("../../plugins/setForget/hooks/useOnchain", () => ({
+  useOnchain: () => mockOnchain,
+}));
+
 const WALLET = "0x1234567890abcdef1234567890abcdef12345678";
-const MAIN_VAULT = "0xd8FD13A95e54640206167d31bb39eF5FfF5dF231";
+// The panel must always send the configured vault, so the expectation follows
+// the deployed contract instead of a hard-coded address.
+const MAIN_VAULT = SET_FORGET_CONTRACTS.mainVault.address;
 
 const savedSubAccount = {
   address: WALLET,
@@ -48,6 +70,29 @@ beforeEach(() => {
   mockPluginApi.mockReset();
   mockAccountState.address = undefined;
   localStorage.clear();
+  Object.values(mockOnchain).forEach((fn) => {
+    if (typeof fn === "function" && "mockReset" in fn) (fn as any).mockReset();
+  });
+  // Default: the user has no on-chain sub-account and no guard subscription.
+  mockOnchain.refresh.mockResolvedValue({
+    reserveBalance: 0n,
+    virtualBalance: 0n,
+    dailyLimit: 0,
+    hasSubAccount: false,
+    subAccountActive: false,
+    threshold: 0n,
+    target: 0n,
+    cooldown: 0,
+    maxDaily: 0,
+    subscriptionActive: false,
+    hasSubscription: false,
+  });
+  mockOnchain.createSubAccount.mockResolvedValue("0xcreate");
+  mockOnchain.updateSubAccountConfig.mockResolvedValue("0xupdate");
+  mockOnchain.setDailyRequestLimit.mockResolvedValue("0xcap");
+  mockOnchain.updateSelfSubscription.mockResolvedValue("0xsub");
+  mockOnchain.subscribeSelf.mockResolvedValue("0xsubscribe");
+  mockOnchain.formatEth.mockImplementation((wei: bigint) => formatEther(wei));
 });
 
 afterEach(() => {
@@ -312,6 +357,218 @@ describe("ConfigurationPanel", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Target must be greater than threshold")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Configuration saved successfully")).not.toBeInTheDocument();
+  });
+
+  it("writes the settings on-chain for the user's own sub-account", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockImplementation((path: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") return Promise.resolve(savedSubAccount);
+      return Promise.resolve([]);
+    });
+    mockOnchain.refresh.mockResolvedValue({
+      reserveBalance: 0n,
+      virtualBalance: 0n,
+      dailyLimit: 10,
+      hasSubAccount: true,
+      subAccountActive: true,
+      threshold: 10000000000000000n,
+      target: 50000000000000000n,
+      cooldown: 300,
+      maxDaily: 10,
+      subscriptionActive: true,
+      hasSubscription: true,
+    });
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Configuration saved successfully")).toBeInTheDocument();
+    });
+
+    // The registry holds the threshold/target that actually trigger a refill.
+    expect(mockOnchain.updateSubAccountConfig).toHaveBeenCalledWith({
+      threshold: "0.01",
+      target: "0.05",
+      cooldown: 300,
+      maxDaily: 10,
+    });
+    // The vault-side cap and the guard subscription are the user's own too.
+    expect(mockOnchain.setDailyRequestLimit).toHaveBeenCalledWith(10);
+    expect(mockOnchain.updateSelfSubscription).toHaveBeenCalledWith({
+      maxDaily: 10,
+      cooldown: 300,
+      isActive: true,
+    });
+    // No on-chain sub-account is created when one already exists.
+    expect(mockOnchain.createSubAccount).not.toHaveBeenCalled();
+  });
+
+  it("creates the on-chain sub-account and subscription when the user has none", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockImplementation((path: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") return Promise.resolve(savedSubAccount);
+      return Promise.resolve([]);
+    });
+    // The registry rejects an update for a sub-account that does not exist
+    // yet, so the panel creates it instead.
+    mockOnchain.updateSubAccountConfig.mockRejectedValue(
+      new Error("Sub-account not active"),
+    );
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Configuration saved successfully")).toBeInTheDocument();
+    });
+
+    expect(mockOnchain.createSubAccount).toHaveBeenCalledWith({
+      threshold: "0.01",
+      target: "0.05",
+      cooldown: 300,
+      maxDaily: 10,
+    });
+    expect(mockOnchain.subscribeSelf).toHaveBeenCalledWith({ maxDaily: 10, cooldown: 300 });
+    expect(mockOnchain.updateSelfSubscription).not.toHaveBeenCalled();
+  });
+
+  it("still writes on-chain when the chain read fails", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockImplementation((path: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") return Promise.resolve(savedSubAccount);
+      return Promise.resolve([]);
+    });
+    mockOnchain.refresh.mockRejectedValue(new Error("RPC timeout"));
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Configuration saved successfully")).toBeInTheDocument();
+    });
+
+    // The write still happened even though the read did not.
+    expect(mockOnchain.updateSubAccountConfig).toHaveBeenCalled();
+    expect(mockOnchain.setDailyRequestLimit).toHaveBeenCalledWith(10);
+  });
+
+  it("keeps a paused subscription paused when the settings are saved", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockImplementation((path: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") return Promise.resolve(savedSubAccount);
+      return Promise.resolve([]);
+    });
+    mockOnchain.refresh.mockResolvedValue({
+      reserveBalance: 0n,
+      virtualBalance: 0n,
+      dailyLimit: 10,
+      hasSubAccount: true,
+      subAccountActive: true,
+      threshold: 10000000000000000n,
+      target: 50000000000000000n,
+      cooldown: 300,
+      maxDaily: 10,
+      subscriptionActive: false,
+      hasSubscription: true,
+    });
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Configuration saved successfully")).toBeInTheDocument();
+    });
+
+    expect(mockOnchain.updateSelfSubscription).toHaveBeenCalledWith({
+      maxDaily: 10,
+      cooldown: 300,
+      isActive: false,
+    });
+  });
+
+  it("treats an unchanged guard subscription as a no-op", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockImplementation((path: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") return Promise.resolve(savedSubAccount);
+      return Promise.resolve([]);
+    });
+    mockOnchain.refresh.mockResolvedValue({
+      reserveBalance: 0n,
+      virtualBalance: 0n,
+      dailyLimit: 10,
+      hasSubAccount: true,
+      subAccountActive: true,
+      threshold: 10000000000000000n,
+      target: 50000000000000000n,
+      cooldown: 300,
+      maxDaily: 10,
+      subscriptionActive: true,
+      hasSubscription: true,
+    });
+    mockOnchain.updateSelfSubscription.mockRejectedValue(
+      new Error("No change needed"),
+    );
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Configuration saved successfully")).toBeInTheDocument();
+    });
+  });
+
+  it("surfaces an on-chain failure without claiming success", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockResolvedValue([]);
+    mockOnchain.refresh.mockResolvedValue({
+      reserveBalance: 0n,
+      virtualBalance: 0n,
+      dailyLimit: 10,
+      hasSubAccount: true,
+      subAccountActive: true,
+      threshold: 10000000000000000n,
+      target: 50000000000000000n,
+      cooldown: 300,
+      maxDaily: 10,
+      subscriptionActive: true,
+      hasSubscription: true,
+    });
+    mockOnchain.updateSubAccountConfig.mockRejectedValue(
+      new Error("Threshold too low"),
+    );
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Threshold too low")).toBeInTheDocument();
     });
     expect(screen.queryByText("Configuration saved successfully")).not.toBeInTheDocument();
   });

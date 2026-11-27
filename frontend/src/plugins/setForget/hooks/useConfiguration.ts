@@ -21,6 +21,44 @@ export interface ConfigurationHistoryEntry {
   changedBy: string | null;
 }
 
+// The browser keeps a per-user copy of the preferences under this key. The
+// worker holds the same values in D1; the browser copy is what keeps the form
+// usable when the plugin API is unreachable.
+const storageKey = (address: string) => `user-config-${address}`;
+
+function readLocalPreferences(address: string): StoredPreferences | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(storageKey(address));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const merged = { ...DEFAULT_PREFERENCES, ...parsed } as StoredPreferences;
+    merged.userAddress = address;
+    if (typeof merged.lastUpdated !== 'number') merged.lastUpdated = Date.now();
+    return merged;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalPreferences(address: string, preferences: StoredPreferences) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(storageKey(address), JSON.stringify(preferences));
+  } catch {
+    // A disabled or full localStorage must never break the save flow.
+  }
+}
+
+function validatePreferences(candidate: Partial<StoredPreferences>): StoredPreferences {
+  const merged = { ...DEFAULT_PREFERENCES, ...candidate } as StoredPreferences;
+  const validRisk = (['low', 'medium', 'high'] as const).includes(merged.riskLevel as any)
+    ? merged.riskLevel
+    : DEFAULT_PREFERENCES.riskLevel;
+  return { ...merged, riskLevel: validRisk } as StoredPreferences;
+}
+
 export const useConfiguration = () => {
   const [preferences, setPreferences] = useState<StoredPreferences | null>(null);
   const [history, setHistory] = useState<ConfigurationHistoryEntry[]>([]);
@@ -32,21 +70,27 @@ export const useConfiguration = () => {
       setIsLoading(true);
       setError(null);
 
-      const response = await pluginApi<any>(
-        `/api/plugins/set-forget/configuration/preferences?address=${address}`
-      );
-      const stored = response?.preferences ?? null;
+      // The worker copy wins; the browser copy is the fallback when the
+      // plugin API is unreachable.
+      let stored: Partial<StoredPreferences> | null = null;
+      try {
+        const response = await pluginApi<any>(
+          `/api/plugins/set-forget/configuration/preferences?address=${address}`
+        );
+        stored = response?.preferences ?? null;
+      } catch (err) {
+        console.warn('Falling back to the locally stored preferences:', err);
+        stored = null;
+      }
 
-      if (!stored) {
+      const merged = stored ?? readLocalPreferences(address);
+      if (!merged) {
         setPreferences(null);
         return null;
       }
 
-      const merged = { ...DEFAULT_PREFERENCES, ...stored } as StoredPreferences;
-      const validRisk = (['low','medium','high'] as const).includes(merged.riskLevel as any)
-        ? merged.riskLevel
-        : DEFAULT_PREFERENCES.riskLevel;
-      const validated = { ...merged, riskLevel: validRisk } as StoredPreferences;
+      const validated = validatePreferences({ ...merged, userAddress: address });
+      writeLocalPreferences(address, validated);
       setPreferences(validated);
       return validated;
     } catch (err) {
@@ -65,24 +109,35 @@ export const useConfiguration = () => {
         ...values,
         riskLevel: (values.riskLevel ?? DEFAULT_PREFERENCES.riskLevel) as RiskLevel,
         userAddress: address,
-      };
-
-      const response = await pluginApi<any>(
-        '/api/plugins/set-forget/configuration/preferences',
-        {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        }
-      );
-
-      const saved = {
-        ...payload,
-        ...(response?.preferences ?? {}),
-        lastUpdated: response?.preferences?.lastUpdated ?? Date.now(),
+        lastUpdated: Date.now(),
       } as StoredPreferences;
 
-      setPreferences(saved);
-      return saved;
+      // The browser copy is written first so a failing worker mirror never
+      // loses the user's settings.
+      writeLocalPreferences(address, payload);
+
+      try {
+        const response = await pluginApi<any>(
+          '/api/plugins/set-forget/configuration/preferences',
+          {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+          }
+        );
+
+        const saved = validatePreferences({
+          ...payload,
+          ...(response?.preferences ?? {}),
+          userAddress: address,
+        });
+
+        writeLocalPreferences(address, saved);
+        setPreferences(saved);
+        return saved;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to save preferences');
+        throw err;
+      }
     },
     []
   );

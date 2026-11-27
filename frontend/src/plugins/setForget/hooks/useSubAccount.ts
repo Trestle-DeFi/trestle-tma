@@ -21,6 +21,8 @@ export interface SubAccountData {
   target: string;
   cooldown?: number;
   maxDaily?: number;
+  /** Whether the user's sub-account / subscription is active. */
+  isActive?: boolean;
   // Per-user configuration can be added by extending this interface
   userSpecificSettings?: Record<string, any>;
 }
@@ -38,18 +40,19 @@ export interface CreateSubAccountData extends SubAccountData {
 // Normalise a worker row (snake_case or camelCase) into the camelCase shape
 // the UI consumes. The worker may return either depending on the route.
 function normalise(row: any): SubAccount {
+  const r = row ?? {};
   return {
-    address: row.address ?? row.user_address,
-    mainVault: row.mainVault ?? row.main_vault_ref,
-    threshold: String(row.threshold ?? "0"),
-    target: String(row.target ?? "0"),
-    cooldown: Number(row.cooldown ?? 0),
-    maxDaily: Number(row.maxDaily ?? row.max_daily ?? 0),
-    isActive: Boolean(row.isActive ?? row.is_active),
-    createdAt: Number(row.createdAt ?? row.created_at ?? 0),
-    sequence: Number(row.sequence ?? 0),
-    totalSpentToday: Number(row.totalSpentToday ?? row.total_spent_today ?? 0),
-    updatedAt: Number(row.updatedAt ?? row.updated_at ?? 0),
+    address: r.address ?? r.user_address,
+    mainVault: r.mainVault ?? r.main_vault_ref,
+    threshold: String(r.threshold ?? "0"),
+    target: String(r.target ?? "0"),
+    cooldown: Number(r.cooldown ?? 0),
+    maxDaily: Number(r.maxDaily ?? r.max_daily ?? 0),
+    isActive: Boolean(r.isActive ?? r.is_active),
+    createdAt: Number(r.createdAt ?? r.created_at ?? 0),
+    sequence: Number(r.sequence ?? 0),
+    totalSpentToday: Number(r.totalSpentToday ?? r.total_spent_today ?? 0),
+    updatedAt: Number(r.updatedAt ?? r.updated_at ?? 0),
   };
 }
 

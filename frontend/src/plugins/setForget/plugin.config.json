@@ -20,25 +20,37 @@
       "chainId": 84532,
       "rpcUrl": "https://sepolia.base.org",
       "contract": "TrestleMainVault",
-      "contractAddress": "0xD403e50CDef51dfb048D0ff4773e85e724f614AD",
+      "contractAddress": "0xbF649Fdf17203ad9432d25EEDF277B85b854F36f",
+      "additionalContracts": [
+        {
+          "contract": "TrestleCCIPBridge",
+          "contractAddress": "0x92011256eB929Ee92c501c67d461B505aB8edaFC"
+        }
+      ],
       "explorer": "https://sepolia.basescan.org",
       "role": "origin",
-      "purpose": "Main vault for reserve funds"
+      "purpose": "Per-user reserve vault; every top-up is paid from the user's own balance"
     },
     "unichainSepolia": {
       "chainId": 1301,
       "rpcUrl": "https://sepolia.unichain.org",
       "contract": "TrestleSubAccount",
-      "contractAddress": "0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4",
+      "contractAddress": "0x5c6F85EdcCC12E4B0c096bd002fD27699B7Ae740",
+      "additionalContracts": [
+        {
+          "contract": "TrestleCCIPReceiver",
+          "contractAddress": "0xB0aAcF8b6345f3342781d1A3D995D84375DB7d8E"
+        }
+      ],
       "explorer": "https://unichain-sepolia.blockscout.com",
       "role": "destination",
-      "purpose": "Operational sub-account for escrows"
+      "purpose": "Self-service sub-account registry and CCIP receiver that credits the destination user"
     },
     "lasnaTestnet": {
       "chainId": 5318007,
       "rpcUrl": "https://lasna-rpc.rnk.dev/",
       "contract": "TrestleReactiveGuard",
-      "contractAddress": "0xf22e65B24B3236B6B4983e81792541139Df6e3Dc",
+      "contractAddress": "0x93b1152F710d325154bF7A095c7509DA173DA25F",
       "explorer": "https://lasna.reactscan.net",
       "role": "reactive",
       "purpose": "Reactive subscription and callback triggering"

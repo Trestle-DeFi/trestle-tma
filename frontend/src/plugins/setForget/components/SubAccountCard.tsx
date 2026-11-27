@@ -6,12 +6,26 @@ interface SubAccountCardProps {
   onUpdate: (address: string, updates: Partial<SubAccount>) => void;
   onDelete: (address: string) => void;
   onActivate?: (account: SubAccount) => void;
+  /** Pauses the user's own subscription on the guard (self-service). */
+  onPause?: (account: SubAccount) => void;
+  /** Resumes the user's own subscription on the guard (self-service). */
+  onResume?: (account: SubAccount) => void;
+  /** Opens the on-chain settings editor for this sub-account (self-service). */
+  onEditSettings?: (account: SubAccount) => void;
 }
 
 const short = (addr: string) =>
   addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '—';
 
-const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDelete, onActivate }) => {
+const SubAccountCard: React.FC<SubAccountCardProps> = ({
+  account,
+  onUpdate,
+  onDelete,
+  onActivate,
+  onPause,
+  onResume,
+  onEditSettings,
+}) => {
   const formatBalance = (balance: string) => {
     const num = parseFloat(balance);
     if (!Number.isFinite(num)) return '0';
@@ -39,10 +53,27 @@ const SubAccountCard: React.FC<SubAccountCardProps> = ({ account, onUpdate, onDe
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {onEditSettings && (
+            <button
+              onClick={() => onEditSettings(account)}
+              className="text-[11px] px-2 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 transition"
+              title="Edit threshold, target, cooldown and daily cap on-chain"
+            >
+              Settings
+            </button>
+          )}
           <button
-            onClick={() =>
-              onUpdate(account.address, { isActive: !account.isActive })
-            }
+            onClick={() => {
+              // Pausing is an on-chain action on the user's own guard
+              // subscription; the UI index is only updated afterwards.
+              if (account.isActive) {
+                if (onPause) onPause(account);
+                else onUpdate(account.address, { isActive: false });
+              } else {
+                if (onResume) onResume(account);
+                else onUpdate(account.address, { isActive: true });
+              }
+            }}
             className="text-[11px] px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 transition"
           >
             {account.isActive ? 'Pause' : 'Resume'}
