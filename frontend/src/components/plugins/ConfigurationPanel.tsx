@@ -8,6 +8,7 @@ import {
   DEFAULT_SETTINGS,
   RiskLevel,
   SET_FORGET_BOUNDS,
+  boundsFromChain,
   validateSettings,
 } from '../../plugins/setForget/config';
 import SubAccountCard from '../../plugins/setForget/components/SubAccountCard';
@@ -55,6 +56,10 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
   const [target, setTarget] = useState(DEFAULT_SETTINGS.target);
   const [cooldown, setCooldown] = useState(String(DEFAULT_SETTINGS.cooldown));
   const [maxDaily, setMaxDaily] = useState(String(DEFAULT_SETTINGS.maxDaily));
+  // The bounds the deployed contracts enforce, read from the chain. They are
+  // not hard-coded: the registry, the guard and the vault each cap the user's
+  // own configuration and the form must respect the strictest one.
+  const [bounds, setBounds] = useState(SET_FORGET_BOUNDS);
   const [autoTopupEnabled, setAutoTopupEnabled] = useState(DEFAULT_PREFERENCES.autoTopupEnabled);
   const [notificationsEnabled, setNotificationsEnabled] = useState(DEFAULT_PREFERENCES.notificationsEnabled);
   const [riskLevel, setRiskLevel] = useState(DEFAULT_PREFERENCES.riskLevel);
@@ -105,6 +110,9 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
       // plain read of the user's own sub-account.
       try {
         const chainState = await refreshOnchainState();
+        // The chain is the source of truth for both the user's settings and
+        // the limits the contracts enforce.
+        setBounds(boundsFromChain(chainState.limits));
         if (chainState.hasSubAccount) {
           setThreshold(formatEth(chainState.threshold));
           setTarget(formatEth(chainState.target));
@@ -146,7 +154,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
       target,
       cooldown: Number(cooldown),
       maxDaily: Number(maxDaily),
-    });
+    }, bounds);
     if (validationError) {
       setError(validationError);
       setSuccess(null);
@@ -170,6 +178,9 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         console.error('Failed to read on-chain state, attempting the write anyway:', err);
         return null;
       });
+      // Re-read the enforced limits so the save is validated against the
+      // deployment as it is right now.
+      setBounds(boundsFromChain(chainState?.limits));
       const dailyCap = Number(maxDaily);
 
       // Update the registry first. If the user has no sub-account yet the
@@ -281,6 +292,7 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
     updateSelfSubscription,
     subscribeSelf,
     refreshOnchainState,
+    bounds,
   ]);
 
   const resetToDefaults = () => {
@@ -337,7 +349,10 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                 placeholder={DEFAULT_SETTINGS.threshold}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
-              <p className="text-xs text-gray-500 mt-1">Auto-topup triggers when balance falls below this amount</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Auto-topup triggers when balance falls below this amount
+                (minimum {formatEth(bounds.minThresholdWei)} ETH)
+              </p>
             </div>
 
             <div>
@@ -357,12 +372,15 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
               <label className="block text-xs text-gray-600 mb-1">Cooldown (seconds)</label>
               <input
                 type="number"
-                min={SET_FORGET_BOUNDS.minCooldownSeconds}
+                min={bounds.minCooldownSeconds}
                 value={cooldown}
                 onChange={(e) => setCooldown(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
-              <p className="text-xs text-gray-500 mt-1">Minimum time between top-ups (300s = 5 minutes)</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Minimum time between top-ups ({bounds.minCooldownSeconds}s ={' '}
+                {Math.round(bounds.minCooldownSeconds / 60)} minutes)
+              </p>
             </div>
 
             <div>
@@ -370,12 +388,15 @@ export const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
               <input
                 type="number"
                 min={1}
-                max={SET_FORGET_BOUNDS.maxDaily}
+                max={bounds.maxDaily}
                 value={maxDaily}
                 onChange={(e) => setMaxDaily(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
               />
-              <p className="text-xs text-gray-500 mt-1">Maximum top-ups per day</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Maximum top-ups per day (up to {bounds.maxDaily} — the strictest limit
+                the registry, guard and vault enforce)
+              </p>
             </div>
           </div>
 

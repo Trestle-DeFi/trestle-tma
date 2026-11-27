@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi';
 import { parseEther, formatEther, type Address } from 'viem';
 import { SET_FORGET_CONTRACTS } from '../../../config/contracts';
+import { SET_FORGET_CHAIN_FALLBACK_LIMITS, type SetForgetChainLimits } from '../config';
 
 // ABIs below expose only the per-user, self-service entry points. Every one of
 // them is callable by the user themself; none of them require the protocol
@@ -41,6 +42,13 @@ export const VAULT_ABI = [
     name: 'getEffectiveDailyLimit',
     stateMutability: 'view',
     inputs: [{ name: 'user', type: 'address' }],
+    outputs: [{ type: 'uint64' }],
+  },
+  {
+    type: 'function',
+    name: 'maxDailyRequestsLimit',
+    stateMutability: 'view',
+    inputs: [],
     outputs: [{ type: 'uint64' }],
   },
 ] as const;
@@ -136,6 +144,28 @@ export const REGISTRY_ABI = [
     inputs: [],
     outputs: [],
   },
+  // The limits the registry enforces on the user's own configuration.
+  {
+    type: 'function',
+    name: 'minThreshold',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'minCooldownPeriod',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint64' }],
+  },
+  {
+    type: 'function',
+    name: 'maxDailyLimit',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint64' }],
+  },
 ] as const;
 
 // The guard keeps a legacy 2-arg setupSubscription next to the 3-arg one, so
@@ -201,7 +231,102 @@ export const GUARD_ABI = [
       },
     ],
   },
+  // The limits the guard enforces on the user's own subscription.
+  {
+    type: 'function',
+    name: 'maxDailyRefillsLimit',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint64' }],
+  },
+  {
+    type: 'function',
+    name: 'minCooldownPeriod',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'uint64' }],
+  },
 ] as const;
+
+/**
+ * A contract reader, narrowed to what the limit reads need. The public
+ * clients are optional (wagmi returns undefined before a chain is available),
+ * so every read is best-effort.
+ */
+type ContractReader = { readContract: (args: any) => Promise<unknown> } | undefined;
+
+/**
+ * Reads the limits the deployed contracts enforce. The registry, the guard and
+ * the vault each cap the user's own configuration, so the UI validates
+ * against the strictest live limit instead of a hard-coded number.
+ */
+async function readChainLimits(
+  baseClient: ContractReader,
+  unichainClient: ContractReader,
+  lasnaClient: ContractReader,
+): Promise<SetForgetChainLimits> {
+  const read = async <T>(
+    client: ContractReader,
+    address: string,
+    abi: readonly unknown[],
+    functionName: string,
+  ): Promise<T | undefined> => {
+    if (!client) return undefined;
+    try {
+      return (await client.readContract({
+        address: address as Address,
+        abi: abi as never,
+        functionName,
+      })) as T;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const [minThresholdWei, minCooldownPeriod, registryMaxDaily, guardMaxDaily, vaultMaxDaily] =
+    await Promise.all([
+      read<bigint>(
+        unichainClient,
+        SET_FORGET_CONTRACTS.subAccount.address,
+        REGISTRY_ABI,
+        'minThreshold',
+      ),
+      read<bigint>(
+        unichainClient,
+        SET_FORGET_CONTRACTS.subAccount.address,
+        REGISTRY_ABI,
+        'minCooldownPeriod',
+      ),
+      read<bigint>(
+        unichainClient,
+        SET_FORGET_CONTRACTS.subAccount.address,
+        REGISTRY_ABI,
+        'maxDailyLimit',
+      ),
+      read<bigint>(
+        lasnaClient,
+        SET_FORGET_CONTRACTS.reactiveGuard.address,
+        GUARD_ABI,
+        'maxDailyRefillsLimit',
+      ),
+      read<bigint>(
+        baseClient,
+        SET_FORGET_CONTRACTS.mainVault.address,
+        VAULT_ABI,
+        'maxDailyRequestsLimit',
+      ),
+    ]);
+
+  return {
+    minThresholdWei: minThresholdWei ?? SET_FORGET_CHAIN_FALLBACK_LIMITS.minThresholdWei,
+    minCooldownSeconds: Number(
+      minCooldownPeriod ?? SET_FORGET_CHAIN_FALLBACK_LIMITS.minCooldownSeconds,
+    ),
+    registryMaxDaily: Number(registryMaxDaily ?? SET_FORGET_CHAIN_FALLBACK_LIMITS.registryMaxDaily),
+    guardMaxDaily: Number(guardMaxDaily ?? SET_FORGET_CHAIN_FALLBACK_LIMITS.guardMaxDaily),
+    vaultMaxDaily: Number(vaultMaxDaily ?? SET_FORGET_CHAIN_FALLBACK_LIMITS.vaultMaxDaily),
+  };
+}
 
 export interface OnchainState {
   /** The user's reserve in the vault, in wei. */
@@ -224,6 +349,8 @@ export interface OnchainState {
   subscriptionActive: boolean;
   /** Whether the user has a guard subscription at all (as opposed to none). */
   hasSubscription: boolean;
+  /** The limits the deployed contracts enforce, read from the chain. */
+  limits?: SetForgetChainLimits;
 }
 
 export const EMPTY_ONCHAIN_STATE: OnchainState = {
@@ -596,6 +723,11 @@ export const useOnchain = () => {
       }>,
     ]);
 
+    // The limits live in the contracts, not in the UI: read them so the form
+    // always validates against the deployed deployment. A failed read is not
+    // fatal — the fallback mirrors the current deployment.
+    const limits = await readChainLimits(baseClient, unichainClient, lasnaClient);
+
     return {
       reserveBalance,
       virtualBalance,
@@ -612,6 +744,7 @@ export const useOnchain = () => {
       hasSubscription:
         subscription.subAccount !== '0x0000000000000000000000000000000000000000' ||
         BigInt(subscription.createdAt ?? 0) > 0n,
+      limits,
     };
   }, [user, baseClient, unichainClient, lasnaClient]);
 

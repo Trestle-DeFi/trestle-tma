@@ -50,7 +50,10 @@ const SetForgetPlugin: React.FC = () => {
   const [subAccounts, setSubAccounts] = useState<SubAccount[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showConfigurationPanel, setShowConfigurationPanel] = useState(false);
-  const [activeTab, setActiveTab] = useState<'subaccounts' | 'configuration'>('subaccounts');
+  // Configuration is the primary entry point: the user configures their
+  // auto-topup there (threshold, target, cooldown, daily cap) and it writes
+  // the registry, the vault and the guard in one go.
+  const [activeTab, setActiveTab] = useState<'subaccounts' | 'configuration'>('configuration');
   const [message, setMessage] = useState<string | null>(null);
 
   // Live on-chain state for the connected user (their own funds only).
@@ -365,8 +368,10 @@ const SetForgetPlugin: React.FC = () => {
   }, [setDailyRequestLimit, dailyCap, refreshOnchain]);
 
   const handleConfigurationChange = (config: any) => {
-    // Refresh sub-account list so UI reflects any threshold/target updates.
+    // Refresh both the worker index and the live chain state so the UI
+    // reflects any threshold/target/cooldown changes the user just saved.
     loadSubAccounts().catch((e) => console.error('Failed to refresh sub-accounts:', e));
+    refreshOnchain().catch((e) => console.error('Failed to refresh on-chain state:', e));
   };
 
   const explorerFor = (chainId: number) =>
@@ -411,17 +416,9 @@ const SetForgetPlugin: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Tab Navigation */}
+      {/* Tab Navigation — Configuration first: it is where the user sets up
+          their auto-topup (threshold, target, cooldown, daily cap). */}
       <div className="flex gap-2 border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab('subaccounts')}
-          className={`px-4 py-2 text-sm font-medium transition ${activeTab === 'subaccounts'
-            ? 'text-emerald-600 border-b-2 border-emerald-500 bg-emerald-50'
-            : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-          }`}
-        >
-          Sub-Accounts
-        </button>
         <button
           onClick={() => setActiveTab('configuration')}
           className={`px-4 py-2 text-sm font-medium transition ${activeTab === 'configuration'
@@ -430,6 +427,15 @@ const SetForgetPlugin: React.FC = () => {
           }`}
         >
           Configuration Management
+        </button>
+        <button
+          onClick={() => setActiveTab('subaccounts')}
+          className={`px-4 py-2 text-sm font-medium transition ${activeTab === 'subaccounts'
+            ? 'text-emerald-600 border-b-2 border-emerald-500 bg-emerald-50'
+            : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'
+          }`}
+        >
+          Sub-Accounts & Funds
         </button>
       </div>
 
@@ -596,6 +602,14 @@ const SetForgetPlugin: React.FC = () => {
               </div>
             </div>
 
+            <p className="text-[10px] text-gray-500 mb-3">
+              <span className="font-medium text-gray-600">Deposit reserve</span> funds your
+              Base-side reserve — the only source of auto-topup money.{' '}
+              <span className="font-medium text-gray-600">Fund operational</span> is a manual
+              top-up of the Unichain-side operational balance; from then on the auto-topup
+              refills it from your reserve.
+            </p>
+
             <div className="flex gap-2 items-end">
               <div className="flex-1">
                 <label className="block text-[11px] text-gray-600 mb-1" htmlFor="sf-dailycap">
@@ -752,18 +766,38 @@ const SetForgetPlugin: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {subAccounts.map(account => (
-                  <SubAccountCard
-                    key={account.address}
-                    account={account}
-                    onUpdate={handleUpdateSubAccount}
-                    onDelete={handleDeleteSubAccount}
-                    onActivate={handleActivate}
-                    onPause={handlePause}
-                    onResume={handleResume}
-                    onEditSettings={handleEditSettings}
-                  />
-                ))}
+                {subAccounts.map(account => {
+                  // The worker's index can lag behind the chain, so the user's
+                  // own card shows the values that are actually on-chain —
+                  // those are the ones that drive the auto-topup.
+                  const isOwn =
+                    !!walletAddress &&
+                    account.address.toLowerCase() === walletAddress.toLowerCase();
+                  const displayAccount: SubAccount =
+                    isOwn && onchain.hasSubAccount
+                      ? {
+                          ...account,
+                          threshold:
+                            onchain.threshold > 0n ? formatEth(onchain.threshold) : account.threshold,
+                          target: onchain.target > 0n ? formatEth(onchain.target) : account.target,
+                          cooldown: onchain.cooldown > 0 ? onchain.cooldown : account.cooldown,
+                          maxDaily: onchain.maxDaily > 0 ? onchain.maxDaily : account.maxDaily,
+                          isActive: onchain.subAccountActive,
+                        }
+                      : account;
+                  return (
+                    <SubAccountCard
+                      key={account.address}
+                      account={displayAccount}
+                      onUpdate={handleUpdateSubAccount}
+                      onDelete={handleDeleteSubAccount}
+                      onActivate={handleActivate}
+                      onPause={handlePause}
+                      onResume={handleResume}
+                      onEditSettings={handleEditSettings}
+                    />
+                  );
+                })}
               </div>
             )}
           </div>

@@ -540,6 +540,55 @@ describe("ConfigurationPanel", () => {
     });
   });
 
+  it("validates against the limits the deployed contracts enforce", async () => {
+    const user = userEvent.setup();
+    mockAccountState.address = WALLET;
+    mockPluginApi.mockResolvedValue([]);
+    // The guard caps the daily refills at 5 on this deployment. The form must
+    // read that from the chain instead of using a hard-coded number.
+    mockOnchain.refresh.mockResolvedValue({
+      reserveBalance: 0n,
+      virtualBalance: 0n,
+      dailyLimit: 5,
+      hasSubAccount: true,
+      subAccountActive: true,
+      threshold: 10000000000000000n,
+      target: 50000000000000000n,
+      cooldown: 300,
+      maxDaily: 5,
+      subscriptionActive: true,
+      hasSubscription: true,
+      limits: {
+        minThresholdWei: 1000000000000000n,
+        minCooldownSeconds: 300,
+        registryMaxDaily: 1000,
+        guardMaxDaily: 5,
+        vaultMaxDaily: 100,
+      },
+    });
+
+    render(<ConfigurationPanel />);
+
+    await flush();
+
+    await waitFor(() => {
+      const [, maxDailyInput] = numberInputs();
+      expect(maxDailyInput).toHaveAttribute("max", "5");
+    });
+
+    // A value above the guard's cap is rejected before any transaction.
+    await user.clear(numberInputs()[1]);
+    await user.type(numberInputs()[1], "10");
+    await user.click(screen.getByText("Save Configuration"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Max daily limit must be between 1 and 5"),
+      ).toBeInTheDocument();
+    });
+    expect(mockOnchain.updateSubAccountConfig).not.toHaveBeenCalled();
+  });
+
   it("surfaces an on-chain failure without claiming success", async () => {
     const user = userEvent.setup();
     mockAccountState.address = WALLET;

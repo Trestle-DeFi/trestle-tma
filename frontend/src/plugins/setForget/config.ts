@@ -13,6 +13,24 @@ export interface SetForgetBounds {
   maxDaily: number;
 }
 
+/**
+ * The limits the deployed contracts actually enforce. They are read from the
+ * chain (registry / guard / vault) instead of being hard-coded in the UI, so
+ * the form always reflects the live deployment.
+ */
+export interface SetForgetChainLimits {
+  /** Registry: the smallest threshold the user may set, in wei. */
+  minThresholdWei: bigint;
+  /** Registry: the smallest cooldown the user may set, in seconds. */
+  minCooldownSeconds: number;
+  /** Registry: the largest daily refill count a sub-account may set. */
+  registryMaxDaily: number;
+  /** Guard: the largest daily refill count a subscription may set. */
+  guardMaxDaily: number;
+  /** Vault: the largest daily top-up request count a user may set. */
+  vaultMaxDaily: number;
+}
+
 export type RiskLevel = 'low' | 'medium' | 'high';
 
 export interface UserPreferenceValues {
@@ -47,6 +65,46 @@ export const DEFAULT_PREFERENCES: UserPreferenceValues = {
   riskLevel: 'medium',
   gasOptimization: true,
 };
+
+/**
+ * Last-resort limits, used only when the chain cannot be read (e.g. an RPC
+ * outage). They mirror the current deployment: the guard's daily refill cap
+ * of 10 is the binding limit, the registry allows 1000 and the vault 100.
+ */
+export const SET_FORGET_CHAIN_FALLBACK_LIMITS: SetForgetChainLimits = {
+  minThresholdWei: SET_FORGET_BOUNDS.minThresholdWei,
+  minCooldownSeconds: SET_FORGET_BOUNDS.minCooldownSeconds,
+  registryMaxDaily: Number(import.meta.env.VITE_SET_FORGET_MAX_DAILY || 1000),
+  guardMaxDaily: Number(import.meta.env.VITE_SET_FORGET_GUARD_MAX_DAILY || 10),
+  vaultMaxDaily: Number(import.meta.env.VITE_SET_FORGET_VAULT_MAX_DAILY || 100),
+};
+
+/**
+ * Derives the bounds the form must respect from the live deployment. Every
+ * contract in the path enforces its own limit, so the effective bound is the
+ * strictest one: the largest cooldown floor and the smallest daily cap.
+ */
+export function boundsFromChain(limits?: Partial<SetForgetChainLimits> | null): SetForgetBounds {
+  const l = { ...SET_FORGET_CHAIN_FALLBACK_LIMITS, ...(limits ?? {}) };
+  const minCooldownSeconds = Math.max(
+    SET_FORGET_BOUNDS.minCooldownSeconds,
+    l.minCooldownSeconds || 0,
+  );
+  const maxDaily = Math.max(
+    1,
+    Math.min(
+      l.registryMaxDaily || SET_FORGET_CHAIN_FALLBACK_LIMITS.registryMaxDaily,
+      l.guardMaxDaily || SET_FORGET_CHAIN_FALLBACK_LIMITS.guardMaxDaily,
+      l.vaultMaxDaily || SET_FORGET_CHAIN_FALLBACK_LIMITS.vaultMaxDaily,
+    ),
+  );
+  return {
+    minThresholdWei:
+      l.minThresholdWei > 0n ? l.minThresholdWei : SET_FORGET_BOUNDS.minThresholdWei,
+    minCooldownSeconds,
+    maxDaily,
+  };
+}
 
 export function validateSettings(
   settings: TopUpSettings,
