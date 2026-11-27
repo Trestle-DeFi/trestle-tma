@@ -15,11 +15,11 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "hono": "^4.13.20",
-    "viem": "^2.58.4"
+    "hono": "^4.13.23",
+    "viem": "^2.58.8"
   },
   "devDependencies": {
-    "wrangler": "4.166.0"
+    "wrangler": "^4.168.0"
   },
   "allowScripts": {
     "esbuild": true,
