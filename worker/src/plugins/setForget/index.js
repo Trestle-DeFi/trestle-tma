@@ -276,9 +276,11 @@ app.get("/api/plugins/set-forget/configuration/history", async (c) => {
 /**
  * Create or refresh a reactive subscription for a sub-account.
  *
- * The on-chain subscription is managed by the ReactiveGuard contract on Lasna
- * (owner-only `setupSubscription`). This endpoint mirrors that state into D1
- * and reports the live on-chain truth alongside it.
+ * The on-chain subscription is managed by the ReactiveGuard contract on Lasna.
+ * A sub-account owner registers and subscribes its own account
+ * (`registerSubAccount` + `setupSubscription`, both self-service), so no
+ * protocol owner transaction is needed. This endpoint mirrors that state into
+ * D1 and reports the live on-chain truth alongside it.
  */
 app.post("/api/plugins/set-forget/reactive/subscription", async (c) => {
   try {

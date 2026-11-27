@@ -20,16 +20,18 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { keccak256, toHex } from "viem";
 
-// Live deployment (contracts/deployments/*.json, deployed 2026-11-23):
-//   TrestleSubAccount    0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4  Unichain Sepolia (1301)
-//   TrestleReactiveGuard 0xf22e65B24B3236B6B4983e81792541139Df6e3Dc  Lasna (5318007)
-//   TrestleMainVault     0xD403e50CDef51dfb048D0ff4773e85e724f614AD  Base Sepolia (84532)
-const GUARD_ADDRESS = "0xf22e65B24B3236B6B4983e81792541139Df6e3Dc";
-const MAIN_VAULT = "0xD403e50CDef51dfb048D0ff4773e85e724f614AD";
-// The guard keys subscriptions by the operator that spends from the
-// sub-account — that is the address holding the live on-chain subscription.
-const SUB_ACCOUNT = "0xE28D13B33C8E2aBF181A950072d64A486f7423eb";
-const ORIGIN_CONTRACT = "0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4";
+// Live deployment (contracts/deployments/*.json, per-user build redeployed 2026-11-26):
+//   TrestleSubAccount    0x5c6F85EdcCC12E4B0c096bd002fD27699B7Ae740  Unichain Sepolia (1301)
+//   TrestleCCIPReceiver  0xB0aAcF8b6345f3342781d1A3D995D84375DB7d8E  Unichain Sepolia (1301)
+//   TrestleReactiveGuard 0x93b1152F710d325154bF7A095c7509DA173DA25F  Lasna (5318007)
+//   TrestleMainVault     0xbF649Fdf17203ad9432d25EEDF277B85b854F36f  Base Sepolia (84532)
+//   TrestleCCIPBridge    0x92011256eB929Ee92c501c67d461B505aB8edaFC  Base Sepolia (84532)
+const GUARD_ADDRESS = "0x93b1152F710d325154bF7A095c7509DA173DA25F";
+const MAIN_VAULT = "0xbF649Fdf17203ad9432d25EEDF277B85b854F36f";
+// The guard keys subscriptions by the user that owns the sub-account — that
+// is the address holding the live on-chain subscription.
+const SUB_ACCOUNT = "0x9280b24542a52cEE54a78dB65A497D8BeC4BAB94";
+const ORIGIN_CONTRACT = "0x5c6F85EdcCC12E4B0c096bd002fD27699B7Ae740";
 const ORIGIN_CHAIN_ID = 1301;
 const LOW_BALANCE_TOPIC =
   "0x51ade1b66b4d8c165822344a89904b54817158763b47b9faacee15c7645199ec";
@@ -223,7 +225,10 @@ integrationTest(
     assert.ok(res.json.onChain, "expected live on-chain subscription data");
     assert.equal(res.json.onChain.isActive, true);
     assert.equal(res.json.onChain.maxDailyRefills, 10);
-    assert.equal(res.json.onChain.dailyRefillCount, 0);
+    // The live refill counter moves whenever the demo triggers a top-up, so
+    // assert its shape instead of a hard-coded value.
+    assert.equal(typeof res.json.onChain.dailyRefillCount, "number");
+    assert.ok(res.json.onChain.dailyRefillCount >= 0);
     assert.equal(
       res.json.onChain.subAccount.toLowerCase(),
       SUB_ACCOUNT.toLowerCase()
@@ -264,7 +269,10 @@ integrationTest(
     // Status now reflects the mirrored subscription.
     assert.equal(status.json.subscriptions.length, 1);
     assert.equal(status.json.subscriptions[0].subAccountAddress, SUB_ACCOUNT);
-    assert.equal(status.json.subscriptions[0].onChain.dailyRefillCount, 0);
+    // The mirrored counter follows the live guard, which advances every time
+    // a refill is triggered.
+    assert.equal(typeof status.json.subscriptions[0].onChain.dailyRefillCount, "number");
+    assert.ok(status.json.subscriptions[0].onChain.dailyRefillCount >= 0);
   }
 );
 

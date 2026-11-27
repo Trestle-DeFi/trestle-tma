@@ -2,7 +2,7 @@ import { createPublicClient, http, keccak256, toHex } from "viem";
 
 // ─── On-chain configuration ────────────────────────────────────────────────
 // ReactiveGuard lives on Lasna (Reactive Network testnet, chainId 5318007).
-export const DEFAULT_GUARD_ADDRESS = "0xf22e65B24B3236B6B4983e81792541139Df6e3Dc";
+export const DEFAULT_GUARD_ADDRESS = "0x93b1152F710d325154bF7A095c7509DA173DA25F";
 export const DEFAULT_LASNA_RPC = "https://lasna-rpc.rnk.dev/";
 
 // topic0 of the origin-chain event the guard reacts to:
@@ -10,6 +10,29 @@ export const DEFAULT_LASNA_RPC = "https://lasna-rpc.rnk.dev/";
 export const LOW_BALANCE_TOPIC = keccak256(
   toHex("LowBalanceDetected(address,uint256,uint256,uint64)")
 );
+
+// The per-user Subscription struct. The deployed guard may still run the
+// previous version, which had no `cooldown` field, so the worker decodes
+// both layouts and keeps working before and after the redeploy.
+const SUBSCRIPTION_COMPONENTS = [
+  { name: "subAccount", type: "address" },
+  { name: "maxDailyRefills", type: "uint64" },
+  { name: "dailyRefillCount", type: "uint64" },
+  { name: "lastRefillDay", type: "uint256" },
+  { name: "lastCooldownAt", type: "uint256" },
+  { name: "cooldown", type: "uint64" },
+  { name: "lastEventHash", type: "bytes32" },
+  { name: "isActive", type: "bool" },
+  { name: "createdAt", type: "uint256" },
+];
+
+const LEGACY_SUBSCRIPTION_COMPONENTS = SUBSCRIPTION_COMPONENTS.filter(
+  (component) => component.name !== "cooldown"
+);
+
+// The guard's default cooldown, used when reading a pre-redeploy guard whose
+// Subscription struct has no `cooldown` field.
+const DEFAULT_COOLDOWN = 300;
 
 const GUARD_ABI = [
   {
@@ -48,20 +71,26 @@ const GUARD_ABI = [
     outputs: [
       {
         type: "tuple",
-        components: [
-          { name: "subAccount", type: "address" },
-          { name: "maxDailyRefills", type: "uint64" },
-          { name: "dailyRefillCount", type: "uint64" },
-          { name: "lastRefillDay", type: "uint256" },
-          { name: "lastCooldownAt", type: "uint256" },
-          { name: "lastEventHash", type: "bytes32" },
-          { name: "isActive", type: "bool" },
-          { name: "createdAt", type: "uint256" },
-        ],
+        components: SUBSCRIPTION_COMPONENTS,
       },
     ],
   },
 ];
+
+// Same ABI, but for a guard that still runs the previous Subscription struct.
+const LEGACY_GUARD_ABI = GUARD_ABI.map((entry) =>
+  entry.name === "getSubscriptionStatus"
+    ? {
+        ...entry,
+        outputs: [
+          {
+            type: "tuple",
+            components: LEGACY_SUBSCRIPTION_COMPONENTS,
+          },
+        ],
+      }
+    : entry
+);
 
 export function guardConfig(env = {}) {
   return {
@@ -83,12 +112,28 @@ function lasnaClient(env = {}) {
 export async function readOnChainSubscription(env, subAccountAddress) {
   const { guardAddress } = guardConfig(env);
   const client = lasnaClient(env);
-  const status = await client.readContract({
-    address: guardAddress,
-    abi: GUARD_ABI,
-    functionName: "getSubscriptionStatus",
-    args: [subAccountAddress],
-  });
+
+  let status;
+  let legacy = false;
+  try {
+    status = await client.readContract({
+      address: guardAddress,
+      abi: GUARD_ABI,
+      functionName: "getSubscriptionStatus",
+      args: [subAccountAddress],
+    });
+  } catch {
+    // A guard deployed before the per-user cooldown existed returns the old
+    // Subscription layout. Fall back to it so the worker keeps working until
+    // the guard is redeployed with the new bytecode.
+    status = await client.readContract({
+      address: guardAddress,
+      abi: LEGACY_GUARD_ABI,
+      functionName: "getSubscriptionStatus",
+      args: [subAccountAddress],
+    });
+    legacy = true;
+  }
 
   return {
     subAccount: status.subAccount,
@@ -96,9 +141,13 @@ export async function readOnChainSubscription(env, subAccountAddress) {
     createdAt: Number(status.createdAt),
     lastEventHash: status.lastEventHash,
     lastCooldownAt: Number(status.lastCooldownAt),
+    // The per-user cooldown is a live on-chain value the user chose.
+    cooldown: Number(status.cooldown ?? DEFAULT_COOLDOWN),
     maxDailyRefills: Number(status.maxDailyRefills),
     dailyRefillCount: Number(status.dailyRefillCount),
     lastRefillDay: Number(status.lastRefillDay),
+    // True when the guard is still running the pre-redeploy bytecode.
+    legacy,
   };
 }
 

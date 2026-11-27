@@ -9,7 +9,7 @@
  */
 
 const WORKER_URL = process.env.WORKER_URL || 'http://localhost:8787';
-const SUB_ACCOUNT_ADDRESS = process.env.SUB_ACCOUNT || '0x6AE0E1bBE014D222417eF3A350088A0204Ed9bF4';
+const SUB_ACCOUNT_ADDRESS = process.env.SUB_ACCOUNT || '0x5c6F85EdcCC12E4B0c096bd002fD27699B7Ae740';
 
 const BASE = `${WORKER_URL}/api/plugins/set-forget`;
 
