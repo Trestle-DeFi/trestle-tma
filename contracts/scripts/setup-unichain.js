@@ -36,16 +36,11 @@ async function main() {
     await hre.ethers.getContractFactory("TrestleSubAccount")
   ).attach(subAccountAddress);
 
-  // createSubAccount is onlyOwner and registers msg.sender, so the operator
-  // must be the contract owner. This account is also the indexed key the
-  // reactive guard subscribes to.
+  // Sub-accounts are permissionless: any address can open its own. The
+  // operator is the account whose EOA is the per-user key inside the
+  // registry and the key the reactive guard subscribes to.
   const owner = await subAccount.owner();
   const operator = process.env.SUBACCOUNT_OPERATOR_ADDRESS || deployer.address;
-  if (operator.toLowerCase() !== owner.toLowerCase()) {
-    throw new Error(
-      `SUBACCOUNT_OPERATOR_ADDRESS ${operator} must be the TrestleSubAccount owner ${owner}`,
-    );
-  }
 
   const threshold = process.env.SUBACCOUNT_THRESHOLD_WEI || "1000000000000000";
   const target = process.env.SUBACCOUNT_TARGET_WEI || "10000000000000000";
@@ -61,7 +56,9 @@ async function main() {
           + "Deactivate it on Unichain before re-running setup.",
       );
     }
-  } else {
+  } else if (operator.toLowerCase() === deployer.address.toLowerCase()) {
+    // Self-serve path: the operator opens its own sub-account. No protocol
+    // owner transaction is involved.
     const tx = await subAccount.createSubAccount(
       vaultAddress,
       threshold,
@@ -71,20 +68,38 @@ async function main() {
     );
     await tx.wait();
     console.log("Sub-account created for", operator);
+  } else {
+    // Scripted path: the registry owner opens the sub-account on behalf of
+    // the operator. The operator still owns the resulting configuration.
+    const tx = await subAccount.createSubAccountFor(
+      operator,
+      vaultAddress,
+      threshold,
+      target,
+      cooldown,
+      maxDaily,
+    );
+    await tx.wait();
+    console.log("Sub-account created for", operator, "by the registry owner");
+  }
+
+  // The user funds their own operational wallet. This is what their own
+  // spends draw from, and it is topped up again by the cross-chain bridge.
+  const operationalWei = process.env.SUBACCOUNT_OPERATIONAL_WEI;
+  if (operationalWei) {
+    if (operator.toLowerCase() === deployer.address.toLowerCase()) {
+      const tx = await subAccount.depositTopUp({ value: operationalWei });
+      await tx.wait();
+      console.log("Operational wallet funded for", operator);
+    } else {
+      console.log(
+        "Skipping the operational deposit: only the user can fund their own wallet",
+      );
+    }
   }
 
   const config = await subAccount.getSubAccountInfo(operator);
-  const bridgeCreditAccount = await subAccount.bridgeCreditAccount();
   const bridgeCreditor = await subAccount.bridgeCreditor();
-
-  if (bridgeCreditAccount.toLowerCase() !== operator.toLowerCase()) {
-    console.log(
-      "Warning: bridgeCreditAccount is",
-      bridgeCreditAccount,
-      "- refills are credited to that account, not",
-      operator,
-    );
-  }
 
   const receiverPath = "./deployments/unichainSepolia-TrestleCCIPReceiver.json";
   if (fs.existsSync(receiverPath)) {

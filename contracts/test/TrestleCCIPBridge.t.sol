@@ -34,12 +34,16 @@ contract MockWETH is ERC20 {
     }
 }
 
+/// @notice A constant-rate Uniswap V3 pool stand-in. The rate is quoted as
+/// USDC (6 decimals) per WETH (18 decimals), and the swap direction follows
+/// the `zeroForOne` flag: token0 in (USDC) or token1 in (WETH).
 contract MockV3Pool {
     address public token0;
     address public token1;
     uint24 public fee;
     uint256 public rate;
     bool public exactInput;
+    uint160 public sqrtPriceX96 = 79228162514264337593543950336;
 
     constructor(address token0_, address token1_, uint24 fee_, uint256 rate_, bool exactInput_) {
         token0 = token0_;
@@ -53,19 +57,28 @@ contract MockV3Pool {
         return 1e30;
     }
 
+    function slot0()
+        external
+        view
+        returns (uint160, int24, uint16, uint16, uint16, uint8, bool)
+    {
+        return (sqrtPriceX96, 0, 0, 0, 0, 0, true);
+    }
+
     function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160, bytes calldata data)
         external
         returns (int256, int256)
     {
-        require(zeroForOne == !exactInput, "Unexpected direction");
         uint256 amountIn;
         uint256 amountOut;
-        if (exactInput) {
+        if (amountSpecified >= 0) {
+            // Exact input: the specified amount is the input token.
             amountIn = uint256(amountSpecified);
-            amountOut = amountIn * rate / 1e18;
+            amountOut = zeroForOne ? (amountIn * 1e18) / rate : (amountIn * rate) / 1e18;
         } else {
+            // Exact output: the specified amount is the output token.
             amountOut = uint256(-amountSpecified);
-            amountIn = amountOut * rate / 1e18;
+            amountIn = zeroForOne ? (amountOut * rate) / 1e18 : (amountOut * 1e18) / rate;
         }
 
         (int256 amount0Delta, int256 amount1Delta) =
@@ -77,7 +90,8 @@ contract MockV3Pool {
         } else {
             MockToken(token0).mint(recipient, amountOut);
         }
-        return (amount0Delta, amount1Delta);
+        // Uniswap V3 returns the positive amounts swapped, not the deltas.
+        return zeroForOne ? (int256(amountIn), int256(amountOut)) : (int256(amountOut), int256(amountIn));
     }
 }
 
@@ -149,15 +163,15 @@ contract TrestleCCIPBridgeTest is Test {
             SOURCE_SELECTOR
         );
         bridge.setDestinationReceiver(destinationReceiver);
-        bridge.setFeeReserve(1e14);
-        vm.deal(address(bridge), 1e14);
+        // The bridge is deliberately NOT funded: the user's reserve pays the
+        // CCIP network fee, so the protocol contributes no capital.
         router.setConsumeTokens(true);
     }
 
     function testBridgeConvertsNativeToUsdcAndDispatchesBoundMessage() public {
         bytes32 requestId = keccak256("request-1");
         vm.prank(vault);
-        bytes32 messageId = bridge.sendTopup{value: 1.01e16}(requestId, subAccount, 1e16);
+        bytes32 messageId = bridge.sendTopup{value: 1.02e16}(requestId, subAccount, 1e16);
 
         assertTrue(bridge.dispatchedRequests(requestId));
         assertEq(router.destinationSelector(), DESTINATION_SELECTOR);
@@ -215,11 +229,24 @@ contract TrestleCCIPBridgeTest is Test {
         bridge.sendTopup{value: 1.01e16}(requestId, subAccount, 1e16);
     }
 
-    function testBridgeRejectsMissingFeeReserve() public {
+    /// @dev The CCIP network fee is paid from the value the user sent, so no
+    /// protocol-funded fee reserve is needed.
+    function testNetworkFeeIsPaidFromTheUsersFunding() public {
         vm.deal(address(bridge), 0);
         vm.prank(vault);
-        vm.expectRevert("Insufficient fee reserve");
-        bridge.sendTopup{value: 1.01e16}(keccak256("request-1"), subAccount, 1e16);
+        bridge.sendTopup{value: 1.02e16}(keccak256("request-1"), subAccount, 1e16);
+
+        assertEq(router.feePaid(), 1e14);
+        // The whole user funding was consumed: the swap value plus the fee.
+        assertEq(address(bridge).balance, 0);
+    }
+
+    /// @dev The fee is reserved out of the incoming value, so a top-up that
+    /// does not cover it is rejected.
+    function testBridgeRejectsFundingThatCannotCoverTheFee() public {
+        vm.prank(vault);
+        vm.expectRevert("Insufficient bridge funding");
+        bridge.sendTopup{value: 1e14}(keccak256("request-1"), subAccount, 1e16);
     }
 }
 
@@ -281,20 +308,19 @@ contract TrestleCCIPReceiverTest is Test {
         view
         returns (bytes memory data)
     {
+        data = _commitment(requestId, account, nativeAmount, 269.2e6, expiry);
+    }
+
+    function _commitment(bytes32 requestId, address account, uint256 nativeAmount, uint256 usdcAmount, uint256 expiry)
+        internal
+        view
+        returns (bytes memory data)
+    {
         bytes32 commitment = keccak256(
             abi.encode(1, sourceBridge, SOURCE_SELECTOR, DESTINATION_SELECTOR, account, nativeAmount, requestId, expiry)
         );
         data = abi.encode(
-            1,
-            sourceBridge,
-            SOURCE_SELECTOR,
-            DESTINATION_SELECTOR,
-            account,
-            nativeAmount,
-            269.2e6,
-            requestId,
-            expiry,
-            commitment
+            1, sourceBridge, SOURCE_SELECTOR, DESTINATION_SELECTOR, account, nativeAmount, usdcAmount, requestId, expiry, commitment
         );
     }
 
@@ -302,7 +328,7 @@ contract TrestleCCIPReceiverTest is Test {
         bytes32 requestId = keccak256("request-1");
         uint256 nativeAmount = 1e16;
         uint256 expiry = block.timestamp + 24 hours;
-        bytes memory data = _commitment(requestId, address(subAccountContract), nativeAmount, expiry);
+        bytes memory data = _commitment(requestId, accountOwner, nativeAmount, expiry);
         usdc.mint(address(receiver), 269.2e6);
 
         vm.prank(router);
@@ -310,16 +336,65 @@ contract TrestleCCIPReceiverTest is Test {
 
         assertTrue(receiver.consumedMessageIds(keccak256("message-1")));
         assertTrue(receiver.consumedRequestIds(requestId));
-        assertEq(subAccountContract.getVirtualBalance(accountOwner), 2e16);
+        assertEq(subAccountContract.getVirtualBalance(accountOwner), nativeAmount);
         assertEq(address(subAccountContract).balance, nativeAmount);
         assertEq(usdc.balanceOf(address(receiver)), 0);
         assertEq(receiver.requestSurplusUsdc(requestId), 0);
         assertEq(receiver.cumulativeSurplusUsdc(), 0);
     }
 
+    /// @dev One receiver settles top-ups for any number of users: the
+    /// destination comes from the payload, not from a hardcoded address.
+    function testReceiverCreditsTheUserNamedInThePayload() public {
+        address secondUser = address(0xB0B);
+
+        vm.prank(secondUser);
+        subAccountContract.createSubAccount(address(this), 1e15, 1e16, 300, 10);
+
+        bytes32 requestId = keccak256("request-2");
+        uint256 nativeAmount = 2e16;
+        uint256 expiry = block.timestamp + 24 hours;
+        bytes memory data = _commitment(requestId, secondUser, nativeAmount, 538.4e6, expiry);
+        usdc.mint(address(receiver), 538.4e6);
+
+        vm.prank(router);
+        receiver.ccipReceive(_message(data, keccak256("message-2"), 538.4e6));
+
+        assertEq(subAccountContract.getVirtualBalance(secondUser), nativeAmount);
+        assertEq(subAccountContract.getVirtualBalance(accountOwner), 0);
+    }
+
+    /// @dev A payload pointing at a different user than the commitment
+    /// covers must be rejected.
+    function testReceiverRejectsDestinationTampering() public {
+        bytes32 requestId = keccak256("request-1");
+        uint256 expiry = block.timestamp + 24 hours;
+        // The commitment covers accountOwner, the payload names somebody else.
+        bytes32 commitment = keccak256(
+            abi.encode(1, sourceBridge, SOURCE_SELECTOR, DESTINATION_SELECTOR, accountOwner, 1e16, requestId, expiry)
+        );
+        bytes memory data = abi.encode(
+            1,
+            sourceBridge,
+            SOURCE_SELECTOR,
+            DESTINATION_SELECTOR,
+            address(0xBAD),
+            1e16,
+            269.2e6,
+            requestId,
+            expiry,
+            commitment
+        );
+        usdc.mint(address(receiver), 269.2e6);
+
+        vm.prank(router);
+        vm.expectRevert("Invalid commitment");
+        receiver.ccipReceive(_message(data, keccak256("message-1"), 269.2e6));
+    }
+
     function testReceiverRejectsWrongCallerSourceOrToken() public {
         bytes32 requestId = keccak256("request-1");
-        bytes memory data = _commitment(requestId, address(subAccountContract), 1e16, block.timestamp + 24 hours);
+        bytes memory data = _commitment(requestId, accountOwner, 1e16, block.timestamp + 24 hours);
         usdc.mint(address(receiver), 269.2e6);
 
         CCIPTypes.Any2EVMMessage memory message = _message(data, keccak256("message-1"), 269.2e6);
@@ -348,7 +423,7 @@ contract TrestleCCIPReceiverTest is Test {
     function testReceiverRejectsTamperingExpiryAndReplay() public {
         bytes32 requestId = keccak256("request-1");
         uint256 expiry = block.timestamp + 24 hours;
-        bytes memory data = _commitment(requestId, address(subAccountContract), 1e16, expiry);
+        bytes memory data = _commitment(requestId, accountOwner, 1e16, expiry);
         usdc.mint(address(receiver), 269.2e6);
 
         bytes memory tampered = abi.encode(
@@ -356,7 +431,7 @@ contract TrestleCCIPReceiverTest is Test {
             sourceBridge,
             SOURCE_SELECTOR,
             DESTINATION_SELECTOR,
-            address(subAccountContract),
+            accountOwner,
             2e16,
             269.2e6,
             requestId,

@@ -19,6 +19,9 @@ async function main() {
   const mainVaultAddress = mainVaultDeploy.address;
   const reactiveGuardAddress = reactiveGuardDeploy.address;
   const [deployer] = await hre.ethers.getSigners();
+  // The per-user key: the USER's address. The registry contract address is
+  // only the log origin the guard watches.
+  const operator = process.env.SUBACCOUNT_OPERATOR_ADDRESS || deployer.address;
 
   console.log("Deployer:", deployer.address);
   console.log("TrestleSubAccount (Unichain):", subAccountAddress);
@@ -41,10 +44,10 @@ async function main() {
 
   // 3. Register sub-account on guard (if not already)
   console.log("\\n--- Registering sub-account on ReactiveGuard ---");
-  const registeredOwner = await guardContract.subAccountOwners(subAccountAddress);
+  const registeredOwner = await guardContract.subAccountOwners(operator);
   console.log("Current registered owner:", registeredOwner);
   if (registeredOwner === "0x0000000000000000000000000000000000000000") {
-    const tx = await guardContract.registerSubAccount(subAccountAddress);
+    const tx = await guardContract.registerSubAccount(operator);
     await tx.wait();
     console.log("✅ Registered sub-account owner:", deployer.address);
   } else {
@@ -53,15 +56,18 @@ async function main() {
 
   // 4. Setup subscription on ReactiveGuard
   console.log("\\n--- Setting up subscription on ReactiveGuard ---");
-  const subscription = await guardContract.getSubscriptionStatus(subAccountAddress);
+  const subscription = await guardContract.getSubscriptionStatus(operator);
   console.log("Current subscription:", subscription);
   if (!subscription.isActive) {
     const maxDailyRefills = 10;
-    const tx = await guardContract.setupSubscription(subAccountAddress, maxDailyRefills);
+    const cooldown = Number(process.env.SUBACCOUNT_COOLDOWN_SECONDS || "300");
+    // Disambiguate the 3-arg overload from the legacy 2-arg one.
+    const tx = await guardContract["setupSubscription(address,uint64,uint64)"](operator, maxDailyRefills, cooldown);
     await tx.wait();
     console.log("✅ Subscription created on ReactiveGuard:");
-    console.log("   SubAccount:", subAccountAddress);
+    console.log("   Sub-account owner:", operator);
     console.log("   Max Daily Refills:", maxDailyRefills);
+    console.log("   Cooldown (seconds):", cooldown);
   } else {
     console.log("✅ Subscription already exists:");
     console.log("   Active:", subscription.isActive);

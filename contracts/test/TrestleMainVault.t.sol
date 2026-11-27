@@ -10,6 +10,15 @@ contract MockTopupBridge {
     address public destination;
     uint256 public amount;
     uint256 public valueReceived;
+    uint256 public feeQuote;
+
+    function setFeeQuote(uint256 fee) external {
+        feeQuote = fee;
+    }
+
+    function quoteFee() external view returns (uint256) {
+        return feeQuote;
+    }
 
     function sendTopup(bytes32 requestId_, address destination_, uint256 amount_) external payable returns (bytes32) {
         requestId = requestId_;
@@ -28,6 +37,7 @@ contract TrestleMainVaultTest is Test {
     address public reactiveSender = vm.addr(3);
     address public unauthorized = vm.addr(4);
     address public destination = vm.addr(5);
+    address public other = vm.addr(6);
 
     function setUp() public {
         vm.startPrank(owner);
@@ -35,7 +45,11 @@ contract TrestleMainVaultTest is Test {
         vault = new TrestleMainVault(IPayable(callbackProxy), reactiveSender);
         vault.setTopupBridge(address(bridge));
         vm.stopPrank();
-        vm.deal(address(vault), 1e18);
+
+        // The user funds their own reserve. The owner contributes nothing.
+        vm.deal(destination, 1e18);
+        vm.prank(destination);
+        vault.depositFor{value: 1e18}(destination);
     }
 
     function _release(bytes32 requestId, uint256 amount, uint256 timestamp, uint64 sequence) internal {
@@ -62,6 +76,93 @@ contract TrestleMainVaultTest is Test {
         assertEq(bridge.destination(), destination);
         assertEq(bridge.amount(), 1e16);
         assertEq(bridge.valueReceived(), 1.01e16);
+        // The user's own reserve funded the top-up, including the 1% bridge
+        // buffer that covers the ETH->USDC->ETH round trip.
+        assertEq(vault.balances(destination), 1e18 - 1.01e16);
+    }
+
+    /// @dev The cross-chain network fee is paid out of the USER's reserve, so
+    /// the protocol never funds a fee buffer of its own.
+    function testNetworkFeeIsPaidFromTheUsersReserve() public {
+        vm.prank(owner);
+        bridge.setFeeQuote(1e14);
+
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        _release(requestId, 1e16, block.timestamp, sequence);
+
+        // 1% bridge buffer + the quoted network fee.
+        assertEq(bridge.valueReceived(), 1.01e16 + 1e14);
+        assertEq(vault.balances(destination), 1e18 - (1.01e16 + 1e14));
+    }
+
+    /// @dev A user's reserve is credited to them and to nobody else.
+    function testDepositForCreditsTheNamedUser() public {
+        vm.deal(other, 5e17);
+        vm.prank(other);
+        vault.depositFor{value: 5e17}(other);
+
+        assertEq(vault.balances(other), 5e17);
+        assertEq(vault.balances(destination), 1e18);
+        assertEq(address(vault).balance, 1.5e18);
+    }
+
+    /// @dev A plain deposit credits the sender's own reserve.
+    function testPlainDepositCreditsTheSender() public {
+        vm.deal(other, 1e17);
+        vm.prank(other);
+        (bool ok,) = address(vault).call{value: 1e17}("");
+        require(ok, "deposit failed");
+
+        assertEq(vault.balances(other), 1e17);
+    }
+
+    /// @dev A user withdraws their own unspent reserve.
+    function testUserCanWithdrawTheirOwnReserve() public {
+        vm.prank(destination);
+        vault.withdraw(1e17);
+
+        assertEq(vault.balances(destination), 1e18 - 1e17);
+        assertEq(destination.balance, 1e17);
+    }
+
+    /// @dev No user — including the contract owner — can withdraw another
+    /// user's reserve.
+    function testUserCannotWithdrawAnotherUsersReserve() public {
+        vm.prank(other);
+        vm.expectRevert("Insufficient balance");
+        vault.withdraw(1e17);
+
+        vm.prank(owner);
+        vm.expectRevert("Insufficient balance");
+        vault.withdraw(1e17);
+    }
+
+    /// @dev A release is funded only from the requesting user's reserve.
+    function testReleaseIsFundedOnlyFromTheRequestingUser() public {
+        // A second user with no reserve of their own.
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), other, sequence));
+        vm.prank(callbackProxy);
+        vm.expectRevert("Insufficient user balance");
+        vault.releaseTopup(reactiveSender, requestId, other, 1e16, block.timestamp, sequence);
+
+        // The funded user's reserve is untouched by the failed request.
+        assertEq(vault.balances(destination), 1e18);
+    }
+
+    /// @dev One user's release does not consume another user's reserve.
+    function testTwoUsersReleaseIndependently() public {
+        vm.deal(other, 1e18);
+        vm.prank(other);
+        vault.depositFor{value: 1e18}(other);
+
+        uint64 sequence = 1;
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, sequence));
+        _release(requestId, 1e16, block.timestamp, sequence);
+
+        assertEq(vault.balances(destination), 1e18 - 1.01e16);
+        assertEq(vault.balances(other), 1e18);
     }
 
     function testRejectsCallerOtherThanCallbackProxy() public {
@@ -176,8 +277,93 @@ contract TrestleMainVaultTest is Test {
         vault.setDefaultMaxDailyRequests(2);
         assertEq(vault.getEffectiveDailyLimit(destination), 2);
 
+        // The protocol's per-user setting is a cap: it can only tighten.
+        vm.prank(owner);
+        vault.setSubAccountDailyLimit(destination, 1);
+        assertEq(vault.getEffectiveDailyLimit(destination), 1);
+
+        // A cap above the user's own limit never raises it.
+        vm.prank(owner);
+        vault.setSubAccountDailyLimit(destination, 5);
+        assertEq(vault.getEffectiveDailyLimit(destination), 2);
+    }
+
+    /// @dev A user sets their own daily request cap — no owner involved.
+    function testUserCanSetTheirOwnDailyRequestLimit() public {
+        vm.prank(destination);
+        vault.setMyDailyRequestLimit(25);
+
+        assertEq(vault.userDailyRequestLimit(destination), 25);
+        assertEq(vault.getEffectiveDailyLimit(destination), 25);
+    }
+
+    /// @dev The user's own cap cannot exceed the protocol ceiling.
+    function testUserDailyLimitIsCappedByTheProtocolCeiling() public {
+        vm.prank(owner);
+        vault.setMaxDailyRequestsLimit(20);
+
+        vm.prank(destination);
+        vm.expectRevert("Invalid daily request limit");
+        vault.setMyDailyRequestLimit(21);
+
+        vm.prank(destination);
+        vault.setMyDailyRequestLimit(20);
+        assertEq(vault.getEffectiveDailyLimit(destination), 20);
+    }
+
+    /// @dev The protocol can always tighten a user's cap, never loosen it.
+    function testProtocolCapOnlyTightensTheEffectiveLimit() public {
+        vm.prank(destination);
+        vault.setMyDailyRequestLimit(50);
+        assertEq(vault.getEffectiveDailyLimit(destination), 50);
+
         vm.prank(owner);
         vault.setSubAccountDailyLimit(destination, 5);
         assertEq(vault.getEffectiveDailyLimit(destination), 5);
+    }
+
+    /// @dev A user may request a top-up for their own sub-account without
+    /// any protocol owner transaction.
+    function testUserCanRequestTheirOwnTopUp() public {
+        vm.prank(destination);
+        vault.requestTopUp(destination, 1, 1e16);
+
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, uint64(1)));
+        (bool settled, bool expired, uint256 amount) = vault.getRequestStatus(requestId);
+        assertFalse(settled);
+        assertFalse(expired);
+        assertEq(amount, 1e16);
+    }
+
+    /// @dev A user may not request a top-up for somebody else.
+    function testUserCannotRequestTopUpForAnotherUser() public {
+        vm.prank(other);
+        vm.expectRevert("Not authorized");
+        vault.requestTopUp(destination, 1, 1e16);
+    }
+
+    /// @dev A user may expire their own stale request.
+    function testUserCanExpireTheirOwnRequest() public {
+        vm.prank(destination);
+        vault.requestTopUp(destination, 1, 1e16);
+
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, uint64(1)));
+        vm.prank(destination);
+        vault.expireRequest(requestId);
+
+        (bool settled, bool expired,) = vault.getRequestStatus(requestId);
+        assertFalse(settled);
+        assertTrue(expired);
+    }
+
+    /// @dev But not somebody else's request.
+    function testUserCannotExpireAnotherUsersRequest() public {
+        vm.prank(destination);
+        vault.requestTopUp(destination, 1, 1e16);
+
+        bytes32 requestId = keccak256(abi.encode(uint256(1301), destination, uint64(1)));
+        vm.prank(other);
+        vm.expectRevert("Not authorized");
+        vault.expireRequest(requestId);
     }
 }

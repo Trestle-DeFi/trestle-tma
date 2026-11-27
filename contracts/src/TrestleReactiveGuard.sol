@@ -17,6 +17,9 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
         uint64 dailyRefillCount;
         uint256 lastRefillDay;
         uint256 lastCooldownAt;
+        /// @notice Per-user cooldown in seconds. The user picks this value
+        /// and can change it at any time; it is not a deployment constant.
+        uint64 cooldown;
         bytes32 lastEventHash;
         bool isActive;
         uint256 createdAt;
@@ -25,9 +28,13 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
     uint256 public constant DESTINATION_CHAIN_ID = 84532;
     uint64 public constant CALLBACK_GAS_LIMIT = 250000;
     uint64 public constant MAX_DAILY_DEFAULT = 10;
-    uint256 public constant COOLDOWN_PERIOD = 300;
+    uint64 public constant COOLDOWN_PERIOD = 300;
 
     uint64 public maxDailyRefillsLimit = MAX_DAILY_DEFAULT;
+    /// @notice Protocol floor on the per-user cooldown. Zero means users may
+    /// pick any cooldown above zero; the owner can raise the floor to keep
+    /// refills from being spammed across all users at once.
+    uint64 public minCooldownPeriod;
 
     uint256 public immutable ORIGIN_CHAIN_ID;
     address public immutable ORIGIN_CONTRACT;
@@ -38,7 +45,7 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
     mapping(bytes32 => bool) public processedEvents;
     mapping(address => address) public subAccountOwners;
 
-    event SubscriptionCreated(address indexed subAccount, uint64 maxDailyRefills, uint256 timestamp);
+    event SubscriptionCreated(address indexed subAccount, uint64 maxDailyRefills, uint64 cooldown, uint256 timestamp);
     event SubAccountRegistered(address indexed subAccount, address indexed owner, uint256 timestamp);
     event TopupCallbackRequested(
         bytes32 indexed requestId,
@@ -51,6 +58,8 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
     event DailyLimitReached(address indexed subAccount);
     event CooldownEnforced(address indexed subAccount, uint256 retryAfter);
     event MaxDailyRefillsLimitUpdated(uint64 limit);
+    event MinCooldownPeriodUpdated(uint64 period);
+    event SubscriptionPaused(address indexed subAccount, uint256 timestamp);
 
     constructor(uint256 originChainId_, address originContract_, uint256 lowBalanceTopic_) payable Ownable(msg.sender) {
         require(originChainId_ != 0, "Origin chain required");
@@ -77,19 +86,46 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
         emit MaxDailyRefillsLimitUpdated(limit);
     }
 
-    function registerSubAccount(address subAccount) external {
-        require(subAccount != address(0), "Invalid sub-account");
-        require(subAccountOwners[subAccount] == address(0), "Sub-account already registered");
-        subAccountOwners[subAccount] = msg.sender;
-        emit SubAccountRegistered(subAccount, msg.sender, block.timestamp);
+    /// @notice Raises the protocol floor on every user's cooldown.
+    function setMinCooldownPeriod(uint64 period) external onlyOwner {
+        minCooldownPeriod = period;
+        emit MinCooldownPeriodUpdated(period);
     }
 
+    /// @notice Registers the caller as the owner of its own subscription.
+    /// @dev The sub-account address IS the user, and it is always its own
+    /// subscription owner. Registration is therefore idempotent and cannot be
+    /// griefed: a third party can neither register on a user's behalf nor
+    /// lock a user out by registering first. The protocol owner may register
+    /// a user during scripted onboarding, but the subscription still belongs
+    /// to the user.
+    function registerSubAccount(address subAccount) external {
+        require(subAccount != address(0), "Invalid sub-account");
+        require(subAccount == msg.sender || msg.sender == owner(), "Can only register yourself");
+        subAccountOwners[subAccount] = subAccount;
+        emit SubAccountRegistered(subAccount, subAccount, block.timestamp);
+    }
+
+    /// @notice Subscribes a sub-account using the default cooldown.
     function setupSubscription(address subAccount, uint64 maxDailyRefills) external {
+        _setupSubscription(subAccount, maxDailyRefills, COOLDOWN_PERIOD);
+    }
+
+    /// @notice Subscribes a sub-account with the user's own cooldown. The
+    /// subscription owner is the address that registered the sub-account, so
+    /// any user can onboard themselves without the protocol owner.
+    function setupSubscription(address subAccount, uint64 maxDailyRefills, uint64 cooldown) external {
+        _setupSubscription(subAccount, maxDailyRefills, cooldown);
+    }
+
+    function _setupSubscription(address subAccount, uint64 maxDailyRefills, uint64 cooldown) internal {
         address subOwner = subAccountOwners[subAccount];
         require(subOwner != address(0), "Sub-account not registered");
         require(subOwner == msg.sender || msg.sender == owner(), "Not sub-account owner nor contract owner");
         require(!subscriptions[subAccount].isActive, "Subscription exists");
         require(maxDailyRefills > 0 && maxDailyRefills <= maxDailyRefillsLimit, "Invalid max daily refills");
+        require(cooldown > 0, "Invalid cooldown");
+        require(cooldown >= minCooldownPeriod, "Cooldown too short");
 
         subscriptions[subAccount] = Subscription({
             subAccount: subAccount,
@@ -97,28 +133,59 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
             dailyRefillCount: 0,
             lastRefillDay: block.timestamp / 86400,
             lastCooldownAt: 0,
+            cooldown: cooldown,
             lastEventHash: bytes32(0),
             isActive: true,
             createdAt: block.timestamp
         });
 
-        emit SubscriptionCreated(subAccount, maxDailyRefills, block.timestamp);
+        emit SubscriptionCreated(subAccount, maxDailyRefills, cooldown, block.timestamp);
     }
 
+    /// @notice Updates a subscription, keeping its current cooldown.
     function updateSubscription(address subAccount, bool isActive, uint64 newMaxDailyRefills) external {
+        _updateSubscription(subAccount, isActive, newMaxDailyRefills, subscriptions[subAccount].cooldown);
+    }
+
+    /// @notice Updates a subscription including the user's own cooldown.
+    function updateSubscription(address subAccount, bool isActive, uint64 newMaxDailyRefills, uint64 newCooldown)
+        external
+    {
+        _updateSubscription(subAccount, isActive, newMaxDailyRefills, newCooldown);
+    }
+
+    function _updateSubscription(address subAccount, bool isActive, uint64 newMaxDailyRefills, uint64 newCooldown)
+        internal
+    {
         address subOwner = subAccountOwners[subAccount];
         require(subOwner != address(0), "Sub-account not registered");
         require(subOwner == msg.sender || msg.sender == owner(), "Not sub-account owner nor contract owner");
         require(
             subscriptions[subAccount].isActive != isActive
-                || subscriptions[subAccount].maxDailyRefills != newMaxDailyRefills,
+                || subscriptions[subAccount].maxDailyRefills != newMaxDailyRefills
+                || subscriptions[subAccount].cooldown != newCooldown,
             "No change needed"
         );
         require(newMaxDailyRefills > 0 && newMaxDailyRefills <= maxDailyRefillsLimit, "Invalid max daily refills");
+        require(newCooldown > 0, "Invalid cooldown");
+        require(newCooldown >= minCooldownPeriod, "Cooldown too short");
         Subscription storage sub = subscriptions[subAccount];
         sub.isActive = isActive;
         sub.maxDailyRefills = newMaxDailyRefills;
+        sub.cooldown = newCooldown;
         sub.dailyRefillCount = 0;
+    }
+
+    /// @notice Pauses the caller's own subscription. This is the user's off
+    /// switch: no further refills are requested, and the daily counter is
+    /// cleared so a later resume starts fresh.
+    function pauseSubscription(address subAccount) external {
+        address subOwner = subAccountOwners[subAccount];
+        require(subOwner != address(0), "Sub-account not registered");
+        require(subOwner == msg.sender || msg.sender == owner(), "Not sub-account owner nor contract owner");
+        subscriptions[subAccount].isActive = false;
+        subscriptions[subAccount].dailyRefillCount = 0;
+        emit SubscriptionPaused(subAccount, block.timestamp);
     }
 
     /// @inheritdoc IReactive
@@ -150,8 +217,9 @@ contract TrestleReactiveGuard is AbstractReactive, Ownable, ReentrancyGuard {
         bytes32 eventHash = keccak256(abi.encode(log_.chainId, log_.txHash, log_.logIndex));
         require(!processedEvents[eventHash], "Event already processed");
 
-        if (sub.lastCooldownAt != 0 && block.timestamp < sub.lastCooldownAt + COOLDOWN_PERIOD) {
-            uint256 retryAfter = sub.lastCooldownAt + COOLDOWN_PERIOD - block.timestamp;
+        uint64 cooldown = sub.cooldown == 0 ? COOLDOWN_PERIOD : sub.cooldown;
+        if (sub.lastCooldownAt != 0 && block.timestamp < sub.lastCooldownAt + cooldown) {
+            uint256 retryAfter = sub.lastCooldownAt + cooldown - block.timestamp;
             emit CooldownEnforced(subAccount, retryAfter);
             revert("Cooldown period active");
         }

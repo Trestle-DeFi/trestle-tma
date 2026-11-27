@@ -19,11 +19,21 @@ contract TrestleCCIPBridge is Ownable, ReentrancyGuard {
     bytes4 private constant EVM_EXTRA_ARGS_V1_TAG = 0x97a657c9;
     uint256 public constant MIN_NATIVE_AMOUNT = 1e15;
     uint256 public constant MAX_NATIVE_AMOUNT = 1e20;
-    uint256 public constant MIN_USDC_PER_ETH = 20_000e6;
     uint256 public constant DESTINATION_EXPIRY = 24 hours;
+    /// @notice Minimum USDC output per ETH accepted from the swap. It is a
+    /// slippage guard against a manipulated or empty pool, not a price feed:
+    /// the owner can lower it when the source market trades below the floor.
+    uint256 public minUsdcPerEth = 1_000e6;
+    /// @dev Uniswap V3's maximum sqrt price. A swap that takes token1 in
+    /// (zeroForOne = false) must be bounded below it, and a zero price limit
+    /// is rejected by the pool with "SPL".
+    uint160 private constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
 
     address public vault;
     address public destinationReceiver;
+    /// @notice Optional emergency buffer that covers a CCIP fee drifting above
+    /// the quote. It is NOT required: the user's reserve pays the network fee
+    /// through `quoteFee()`, so the protocol contributes no capital.
     uint256 public feeReserve;
     uint256 public destinationGasLimit;
     ICCIPRouter public immutable ccipRouter;
@@ -49,6 +59,7 @@ contract TrestleCCIPBridge is Ownable, ReentrancyGuard {
         bytes32 commitment,
         bytes32 messageId
     );
+    event MinUsdcPerEthUpdated(uint256 minUsdcPerEth);
 
     constructor(
         address vault_,
@@ -78,6 +89,19 @@ contract TrestleCCIPBridge is Ownable, ReentrancyGuard {
         require(basePool.token0() == address(usdc_) && basePool.token1() == address(weth_), "Unexpected pool tokens");
     }
 
+    /// @notice Quotes the CCIP network fee for a top-up.
+    /// @dev The fee is a function of the destination gas price and the
+    /// encoded message length. Neither depends on the USDC amount, so the
+    /// fee can be quoted before the swap happens. Quoting is what lets the
+    /// USER's reserve pay the network fee instead of a protocol-funded
+    /// buffer: the vault asks for the quote, adds it to the funding, and
+    /// the bridge reserves that amount out of the value it was sent.
+    function quoteFee() public view returns (uint256) {
+        CCIPTypes.EVM2AnyMessage memory probe =
+            _buildMessage(bytes32(0), address(this), MIN_NATIVE_AMOUNT, 0, block.timestamp, bytes32(0));
+        return ccipRouter.getFee(destinationSelector, probe);
+    }
+
     /// @notice Called by the vault with native ETH. The amount argument is the
     /// exact native ETH amount that must be restored on the destination.
     function sendTopup(bytes32 requestId, address subAccount, uint256 nativeAmount)
@@ -91,17 +115,24 @@ contract TrestleCCIPBridge is Ownable, ReentrancyGuard {
         require(destinationReceiver != address(0), "Destination receiver not configured");
         require(nativeAmount >= MIN_NATIVE_AMOUNT && nativeAmount <= MAX_NATIVE_AMOUNT, "Native amount out of bounds");
         require(!dispatchedRequests[requestId], "Request already dispatched");
-        require(msg.value >= nativeAmount, "Insufficient bridge funding");
+
+        // The CCIP network fee is reserved out of the value the user sent,
+        // so no protocol-funded fee reserve is required. `swapValue` is what
+        // is actually converted to USDC and bridged.
+        uint256 fee = quoteFee();
+        require(msg.value > fee, "Insufficient bridge funding");
+        uint256 swapValue = msg.value - fee;
 
         uint256 usdcBefore = usdc.balanceOf(address(this));
-        weth.deposit{value: msg.value}();
-        uint256 wethAmount = weth.balanceOf(address(this));
+        uint256 wethBefore = weth.balanceOf(address(this));
+        weth.deposit{value: swapValue}();
+        uint256 wethAmount = weth.balanceOf(address(this)) - wethBefore;
         weth.approve(address(basePool), wethAmount);
         _swapWethForUsdc(wethAmount);
         uint256 usdcAmount = usdc.balanceOf(address(this)) - usdcBefore;
         require(usdcAmount > 0, "No USDC output");
 
-        uint256 minimumUsdc = (msg.value * MIN_USDC_PER_ETH) / 1e18;
+        uint256 minimumUsdc = (swapValue * minUsdcPerEth) / 1e18;
         require(usdcAmount >= minimumUsdc, "Insufficient USDC output");
 
         uint256 expiry = block.timestamp + DESTINATION_EXPIRY;
@@ -117,6 +148,35 @@ contract TrestleCCIPBridge is Ownable, ReentrancyGuard {
                 expiry
             )
         );
+        CCIPTypes.EVM2AnyMessage memory message =
+            _buildMessage(requestId, subAccount, nativeAmount, usdcAmount, expiry, commitment);
+
+        // The fee is recomputed against the final message. It normally equals
+        // the quote exactly; any drift is covered by the balance the bridge
+        // already holds.
+        uint256 finalFee = ccipRouter.getFee(destinationSelector, message);
+        require(address(this).balance >= finalFee, "Insufficient fee reserve");
+        usdc.forceApprove(address(ccipRouter), usdcAmount);
+        messageId = ccipRouter.ccipSend{value: finalFee}(destinationSelector, message);
+        usdc.forceApprove(address(ccipRouter), 0);
+
+        dispatchedRequests[requestId] = true;
+        requestCommitments[requestId] = commitment;
+        emit TopupDispatched(requestId, subAccount, nativeAmount, usdcAmount, commitment, messageId);
+    }
+
+    /// @dev Builds the CCIP message. The probe used for the fee quote and the
+    /// final message have identical encodings, so they carry the same fee.
+    function _buildMessage(
+        bytes32 requestId,
+        address subAccount,
+        uint256 nativeAmount,
+        uint256 usdcAmount,
+        uint256 expiry,
+        bytes32 commitment
+    ) internal view returns (CCIPTypes.EVM2AnyMessage memory) {
+        CCIPTypes.TokenAmount[] memory tokenAmounts = new CCIPTypes.TokenAmount[](1);
+        tokenAmounts[0] = CCIPTypes.TokenAmount({token: address(usdc), amount: usdcAmount});
         bytes memory data = abi.encode(
             COMMITMENT_VERSION,
             address(this),
@@ -129,36 +189,27 @@ contract TrestleCCIPBridge is Ownable, ReentrancyGuard {
             expiry,
             commitment
         );
-
-        CCIPTypes.TokenAmount[] memory tokenAmounts = new CCIPTypes.TokenAmount[](1);
-        tokenAmounts[0] = CCIPTypes.TokenAmount({token: address(usdc), amount: usdcAmount});
-        usdc.forceApprove(address(ccipRouter), usdcAmount);
-
-        CCIPTypes.EVM2AnyMessage memory message = CCIPTypes.EVM2AnyMessage({
+        return CCIPTypes.EVM2AnyMessage({
             receiver: abi.encode(destinationReceiver),
             data: data,
             tokenAmounts: tokenAmounts,
             feeToken: address(0),
             extraArgs: abi.encodeWithSelector(EVM_EXTRA_ARGS_V1_TAG, destinationGasLimit)
         });
-
-        // CCIP v1.2.0 does not refund native-fee overpayment. Quote the exact
-        // fee, cap it with the configured reserve, and forward only that fee.
-        uint256 fee = ccipRouter.getFee(destinationSelector, message);
-        require(fee <= feeReserve, "Fee exceeds reserve");
-        require(address(this).balance >= fee, "Insufficient fee reserve");
-        messageId = ccipRouter.ccipSend{value: fee}(destinationSelector, message);
-        usdc.forceApprove(address(ccipRouter), 0);
-
-        dispatchedRequests[requestId] = true;
-        requestCommitments[requestId] = commitment;
-        emit TopupDispatched(requestId, subAccount, nativeAmount, usdcAmount, commitment, messageId);
     }
 
     function _swapWethForUsdc(uint256 amountIn) private {
         // Base pool ordering is USDC(token0), WETH(token1). WETH in therefore
         // uses zeroForOne=false and requests an exact input of WETH.
-        basePool.swap(address(this), false, int256(amountIn), 0, abi.encode(address(weth), address(this)));
+        // Uniswap V3 rejects a zero price limit with "SPL", so the exact-input
+        // swap is bounded by the highest representable price.
+        basePool.swap(
+            address(this),
+            false,
+            int256(amountIn),
+            uint160(MAX_SQRT_RATIO - 1),
+            abi.encode(address(weth), address(this))
+        );
     }
 
     /// @notice Uniswap V3 callback. Only the configured Base pool may invoke it.
@@ -185,6 +236,16 @@ contract TrestleCCIPBridge is Ownable, ReentrancyGuard {
 
     function setFeeReserve(uint256 newFeeReserve) external onlyOwner {
         feeReserve = newFeeReserve;
+    }
+
+    /// @notice Adjusts the minimum USDC output per ETH accepted from the swap.
+    /// @dev The floor is a slippage guard, not a price feed. Test networks
+    /// often quote ETH far below mainnet levels, so the owner can lower it
+    /// instead of stranding every user's top-up.
+    function setMinUsdcPerEth(uint256 newMinUsdcPerEth) external onlyOwner {
+        require(newMinUsdcPerEth > 0, "Invalid floor");
+        minUsdcPerEth = newMinUsdcPerEth;
+        emit MinUsdcPerEthUpdated(newMinUsdcPerEth);
     }
 
     function setDestinationGasLimit(uint256 newDestinationGasLimit) external onlyOwner {

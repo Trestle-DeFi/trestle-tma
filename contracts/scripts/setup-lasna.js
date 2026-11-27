@@ -58,11 +58,25 @@ async function main() {
   // Subscriptions are keyed by the indexed account in LowBalanceDetected,
   // which is the sub-account owner/operator that calls spend().
   const operator = process.env.SUBACCOUNT_OPERATOR_ADDRESS || deployer.address;
+
+  // Registration is self-service: the account that owns the sub-account
+  // registers it and subscribes it, with no protocol owner involvement.
+  const registeredOwner = await guard.subAccountOwners(operator);
+  if (registeredOwner === "0x0000000000000000000000000000000000000000") {
+    await (await guard.registerSubAccount(operator)).wait();
+    console.log("Guard sub-account registered for", operator);
+  } else {
+    console.log("Guard sub-account already registered to", registeredOwner);
+  }
+
   const subscription = await guard.getSubscriptionStatus(operator);
   if (!subscription.isActive) {
     const maxDailyRefills = process.env.MAX_DAILY_REFILLS || "10";
+    const cooldown = Number(process.env.SUBACCOUNT_COOLDOWN_SECONDS || "300");
+    // The guard deliberately keeps a 2-arg legacy overload alongside the 3-arg
+    // one, so ethers v6 must be given the full signature to disambiguate.
     await (
-      await guard.setupSubscription(operator, Number(maxDailyRefills))
+      await guard["setupSubscription(address,uint64,uint64)"](operator, Number(maxDailyRefills), cooldown)
     ).wait();
     console.log("Guard subscription configured for", operator);
   } else {

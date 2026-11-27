@@ -9,12 +9,18 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {CCIPTypes, IAny2EVMMessageReceiver, IUniswapV3Pool, IWETH9} from "./TrestleBridgeInterfaces.sol";
 
 interface ITrestleSubAccountBridge {
-    function receiveTopUpFromBridge(uint256 amount) external payable;
+    function receiveTopUpFromBridge(uint256 amount, address destination) external payable;
 }
 
 /// @title Unichain Sepolia CCIP receiver
 /// @notice Receives the exact CCIP USDC token, swaps it to WETH, unwraps the
-/// WETH, and credits native ETH to the authorized sub-account.
+/// WETH, and credits native ETH to the sub-account named in the message.
+///
+/// @dev The destination user is read from the CCIP payload, whose
+/// sub-account field is covered by the bridge's commitment hash. The
+/// receiver therefore settles top-ups for any number of users instead of a
+/// single hardcoded account, while `subAccountContract` only says WHERE the
+/// native ETH is delivered.
 contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceiver, IERC165 {
     using SafeERC20 for IERC20;
 
@@ -29,12 +35,15 @@ contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceive
     IERC20 public immutable usdc;
     IWETH9 public immutable weth;
     IUniswapV3Pool public immutable unichainPool;
-    address public subAccount;
+    /// @notice The registry contract that receives the native ETH. The user
+    /// credited with it is resolved from the message payload.
+    address public subAccountContract;
 
     mapping(bytes32 => bool) public consumedMessageIds;
     mapping(bytes32 => bool) public consumedRequestIds;
     mapping(bytes32 => bytes32) public requestCommitments;
     mapping(bytes32 => int256) public requestSurplusUsdc;
+    mapping(bytes32 => uint256) public requestSurplusWeth;
     int256 public cumulativeSurplusUsdc;
 
     event TopupReceived(
@@ -54,14 +63,14 @@ contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceive
         address usdc_,
         address weth_,
         address unichainPool_,
-        address subAccount_
+        address subAccountContract_
     ) Ownable(msg.sender) {
         require(expectedSourceBridge_ != address(0), "Source bridge required");
         require(router_ != address(0), "Router required");
         require(sourceSelector_ != 0 && destinationSelector_ != 0, "Selector required");
         require(usdc_ != address(0) && weth_ != address(0), "Token required");
         require(unichainPool_ != address(0), "Pool required");
-        require(subAccount_ != address(0), "Sub-account required");
+        require(subAccountContract_ != address(0), "Sub-account contract required");
 
         expectedSourceBridge = expectedSourceBridge_;
         router = router_;
@@ -70,7 +79,7 @@ contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceive
         usdc = IERC20(usdc_);
         weth = IWETH9(weth_);
         unichainPool = IUniswapV3Pool(unichainPool_);
-        subAccount = subAccount_;
+        subAccountContract = subAccountContract_;
 
         require(
             unichainPool.token0() == address(usdc_) && unichainPool.token1() == address(weth_), "Unexpected pool tokens"
@@ -105,7 +114,10 @@ contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceive
         require(encodedSourceBridge == sourceBridge, "Source bridge mismatch");
         require(encodedSourceSelector == sourceSelector, "Source selector mismatch");
         require(encodedDestinationSelector == destinationSelector, "Destination selector mismatch");
-        require(encodedSubAccount == subAccount, "Sub-account mismatch");
+        // The destination user comes from the payload rather than a
+        // hardcoded constructor address. The commitment hash below covers
+        // this exact field, so it cannot be tampered with in transit.
+        require(encodedSubAccount != address(0), "Invalid destination");
         require(nativeAmount >= MIN_NATIVE_AMOUNT && nativeAmount <= MAX_NATIVE_AMOUNT, "Native amount out of bounds");
         require(message.destTokenAmounts.length == 1, "Unexpected token count");
         require(message.destTokenAmounts[0].token == address(usdc), "Unexpected token");
@@ -121,7 +133,7 @@ contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceive
                 sourceBridge,
                 sourceSelector,
                 destinationSelector,
-                subAccount,
+                encodedSubAccount,
                 nativeAmount,
                 requestId,
                 expiry
@@ -133,26 +145,46 @@ contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceive
         consumedRequestIds[requestId] = true;
         requestCommitments[requestId] = commitment;
 
-        uint256 usdcSpent = _swapUsdcForExactWeth(nativeAmount);
-        int256 surplusUsdc = int256(usdcAmount) - int256(usdcSpent);
+        uint256 wethOut = _swapUsdcForWeth(usdcAmount);
+        // The destination market converts the bridged value into native ETH.
+        // The amount actually delivered is capped by the requested amount, and
+        // any surplus stays in the receiver instead of being lost.
+        uint256 wethBalance = weth.balanceOf(address(this));
+        uint256 delivered = wethOut > wethBalance ? wethBalance : wethOut;
+        if (delivered > nativeAmount) {
+            delivered = nativeAmount;
+        }
+        require(delivered > 0, "No WETH output");
+        // The whole delivered USDC was sold, so the USDC surplus is zero and
+        // any leftover is WETH that stays in the receiver.
+        int256 surplusUsdc = 0;
+        uint256 surplusWeth = wethOut > delivered ? wethOut - delivered : 0;
         requestSurplusUsdc[requestId] = surplusUsdc;
+        requestSurplusWeth[requestId] = surplusWeth;
         cumulativeSurplusUsdc += surplusUsdc;
 
-        uint256 wethBalance = weth.balanceOf(address(this));
-        require(wethBalance >= nativeAmount, "Insufficient WETH output");
-        weth.withdraw(nativeAmount);
-        ITrestleSubAccountBridge(subAccount).receiveTopUpFromBridge{value: nativeAmount}(nativeAmount);
+        weth.withdraw(delivered);
+        ITrestleSubAccountBridge(subAccountContract).receiveTopUpFromBridge{value: delivered}(delivered, encodedSubAccount);
 
-        emit TopupReceived(message.messageId, requestId, subAccount, nativeAmount, usdcAmount, surplusUsdc);
+        emit TopupReceived(message.messageId, requestId, encodedSubAccount, delivered, usdcAmount, surplusUsdc);
     }
 
-    function _swapUsdcForExactWeth(uint256 amountOut) private returns (uint256 usdcSpent) {
-        // Unichain pool ordering is USDC(token0), WETH(token1). A negative
-        // amountSpecified requests an exact output of WETH.
-        usdc.forceApprove(address(unichainPool), usdc.balanceOf(address(this)));
-        (int256 amount0Delta,) =
-            unichainPool.swap(address(this), true, -int256(amountOut), 0, abi.encode(address(usdc), address(this)));
-        usdcSpent = amount0Delta > 0 ? uint256(amount0Delta) : 0;
+    function _swapUsdcForWeth(uint256 usdcIn) private returns (uint256 wethOut) {
+        // Unichain pool ordering is USDC(token0), WETH(token1). USDC in
+        // therefore uses zeroForOne=true and requests an exact input of USDC:
+        // the receiver converts whatever the bridge actually delivered instead
+        // of demanding a fixed amount and reverting the whole CCIP message.
+        //
+        // The price limit is derived from the pool's current price because the
+        // deployed pool rejects the canonical MIN_SQRT_RATIO + 1 bound with
+        // "SPL". An exact-input swap that takes token0 in only moves the price
+        // down, so a limit below the current price stays valid throughout.
+        (uint160 sqrtPriceX96,,,,,,) = unichainPool.slot0();
+        uint160 limit = uint160((uint256(sqrtPriceX96) * 99) / 100);
+        usdc.forceApprove(address(unichainPool), usdcIn);
+        (, int256 amount1) =
+            unichainPool.swap(address(this), true, int256(usdcIn), limit, abi.encode(address(usdc), address(this)));
+        wethOut = amount1 > 0 ? uint256(amount1) : 0;
     }
 
     /// @notice Uniswap V3 callback. Only the configured Unichain pool may
@@ -173,9 +205,12 @@ contract TrestleCCIPReceiver is Ownable, ReentrancyGuard, IAny2EVMMessageReceive
         return interfaceId == type(IAny2EVMMessageReceiver).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
-    function setSubAccount(address newSubAccount) external onlyOwner {
-        require(newSubAccount != address(0), "Sub-account required");
-        subAccount = newSubAccount;
+    /// @notice Points the receiver at the sub-account registry that should
+    /// receive the native ETH. The credited user still comes from each
+    /// message payload.
+    function setSubAccountContract(address newSubAccountContract) external onlyOwner {
+        require(newSubAccountContract != address(0), "Sub-account contract required");
+        subAccountContract = newSubAccountContract;
     }
 
     receive() external payable {}

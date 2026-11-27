@@ -5,12 +5,13 @@ const steps = [
   ["Lasna reactive guard", "lasnaTestnet", "scripts/deploy-reactiveguard.js"],
   ["Base Sepolia main vault", "baseSepolia", "scripts/deploy-mainvault.js"],
   ["Base Sepolia CCIP bridge", "baseSepolia", "scripts/deploy-ccipbridge.js"],
-  // The receiver constructor path requires an existing bridgeCreditAccount, so
-  // the sub-account must be created (against the newly deployed vault) first.
+  // The receiver's constructor takes the sub-account registry address, so the
+  // registry must be deployed (and its entry created) before the receiver.
   ["Unichain Sepolia sub-account setup", "unichainSepolia", "scripts/setup-unichain.js"],
   ["Unichain Sepolia CCIP receiver", "unichainSepolia", "scripts/deploy-ccipreceiver.js"],
   ["Base Sepolia setup", "baseSepolia", "scripts/setup-baseSepolia.js"],
   ["Lasna setup", "lasnaTestnet", "scripts/setup-lasna.js"],
+  ["Cross-chain setup", "lasnaTestnet", "scripts/setup-crosschain.js"],
 ];
 
 function main() {

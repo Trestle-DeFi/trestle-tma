@@ -23,10 +23,6 @@ async function main() {
 
   const TrestleSubAccount = await hre.ethers.getContractFactory("TrestleSubAccount");
   const subAccountContract = TrestleSubAccount.attach(subAccount);
-  const bridgeCreditAccount = await subAccountContract.bridgeCreditAccount();
-  if (bridgeCreditAccount === "0x0000000000000000000000000000000000000000") {
-    throw new Error("Sub-account must be created before deploying the CCIP receiver");
-  }
 
   const TrestleCCIPReceiver = await hre.ethers.getContractFactory("TrestleCCIPReceiver");
   const receiver = await TrestleCCIPReceiver.deploy(
