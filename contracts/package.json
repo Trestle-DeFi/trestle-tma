@@ -13,11 +13,17 @@
     "setup:unichainSepolia": "hardhat run scripts/setup-unichain.js --network unichainSepolia",
     "setup:baseSepolia": "hardhat run scripts/setup-baseSepolia.js --network baseSepolia",
     "setup:lasna": "hardhat run scripts/setup-lasna.js --network lasnaTestnet",
+    "setup:crosschain": "hardhat run scripts/setup-crosschain.js --network lasnaTestnet",
+    "setup:user": "hardhat run scripts/setup-user.js --network baseSepolia",
     "deploy:all": "hardhat run scripts/deploy-all.js",
-    "test": "hardhat test",
+    "test": "forge test",
+    "test:foundry": "forge test",
     "verify:baseSepolia": "hardhat verify --network baseSepolia DEPLOYED_CONTRACT_ADDRESS",
     "verify:unichainSepolia": "hardhat verify --network unichainSepolia DEPLOYED_CONTRACT_ADDRESS",
-    "verify:lasna": "hardhat verify --network lasnaTestnet DEPLOYED_CONTRACT_ADDRESS"
+    "verify:lasna": "hardhat verify --network lasnaTestnet DEPLOYED_CONTRACT_ADDRESS",
+    "verify:all:baseSepolia": "hardhat run scripts/verify-all.js --network baseSepolia",
+    "verify:all:unichainSepolia": "hardhat run scripts/verify-all.js --network unichainSepolia",
+    "verify:all:lasna": "hardhat run scripts/verify-all.js --network lasnaTestnet"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

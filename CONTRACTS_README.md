@@ -4,6 +4,121 @@
 
 This repository contains smart contracts for the Trestle Set & Forget system, enabling configurable per‑user sub‑account management with guard subscriptions and cross‑chain capabilities.
 
+## Live Deployment (Testnets)
+
+| Contract | Chain | Address |
+| --- | --- | --- |
+| `TrestleSubAccount` | Unichain Sepolia (1301) | `0x5c6F85EdcCC12E4B0c096bd002fD27699B7Ae740` |
+| `TrestleCCIPReceiver` | Unichain Sepolia (1301) | `0xB0aAcF8b6345f3342781d1A3D995D84375DB7d8E` |
+| `TrestleMainVault` | Base Sepolia (84532) | `0xbF649Fdf17203ad9432d25EEDF277B85b854F36f` |
+| `TrestleCCIPBridge` | Base Sepolia (84532) | `0x92011256eB929Ee92c501c67d461B505aB8edaFC` |
+| `TrestleReactiveGuard` | Lasna Testnet (5318007) | `0x93b1152F710d325154bF7A095c7509DA173DA25F` |
+
+The frontend (`frontend/src/config/contracts.ts`), the worker
+(`worker/wrangler.jsonc`, `worker/src/plugins/setForget/reactiveWorker.js`) and the
+plugin manifest (`frontend/src/plugins/setForget/plugin.config.json`) all point at
+these addresses.
+
+### Explorer verification
+
+All five deployed contracts are source‑verified. The attached sources are byte‑identical
+to the files in `contracts/src/` and compile with `solc 0.8.37+commit.f401782d`
+(`evmVersion cancun`, optimizer on with `runs: 200`, `viaIR: true`).
+
+| Contract | Chain | Explorer | Verified source |
+| --- | --- | --- | --- |
+| `TrestleMainVault` | Base Sepolia | [sepolia.basescan.org](https://sepolia.basescan.org/address/0xbF649Fdf17203ad9432d25EEDF277B85b854F36f#code) | Standard‑JSON input |
+| `TrestleCCIPBridge` | Base Sepolia | [sepolia.basescan.org](https://sepolia.basescan.org/address/0x92011256eB929Ee92c501c67d461B505aB8edaFC#code) | Standard‑JSON input |
+| `TrestleSubAccount` | Unichain Sepolia | [unichain-sepolia.blockscout.com](https://unichain-sepolia.blockscout.com/address/0x5c6F85EdcCC12E4B0c096bd002fD27699B7Ae740#code) · [Sourcify](https://repo.sourcify.dev/contracts/full_match/1301/0x5c6F85EdcCC12E4B0c096bd002fD27699B7Ae740/) | Flattened source + exact match |
+| `TrestleCCIPReceiver` | Unichain Sepolia | [unichain-sepolia.blockscout.com](https://unichain-sepolia.blockscout.com/address/0xB0aAcF8b6345f3342781d1A3D995D84375DB7d8E#code) · [Sourcify](https://repo.sourcify.dev/contracts/full_match/1301/0xB0aAcF8b6345f3342781d1A3D995D84375DB7d8E/) | Flattened source + exact match |
+| `TrestleReactiveGuard` | Lasna Testnet | [lasna.reactscan.net](https://lasna.reactscan.net/address/0x93b1152F710d325154bF7A095c7509DA173DA25F) · [Sourcify](https://repo.sourcify.dev/contracts/full_match/5318007/0x93b1152F710d325154bF7A095c7509DA173DA25F/) | Exact match (Reactscan serves Sourcify) |
+
+Notes:
+- Base Sepolia uses the **Etherscan V2 unified API** (`https://api.etherscan.io/v2/api?chainid=84532`).
+  The legacy per‑chain endpoint `api-sepolia.basescan.org/api` now returns `NOTOK`.
+- Unichain Sepolia's Blockscout verifies **asynchronously**; a submission returns a GUID and the
+  source is attached only after the queue drains, so `getsourcecode` can still return an empty
+  source immediately after submitting.
+- Lasna's Reactscan explorer has no Etherscan‑style API — it renders contract sources straight
+  from Sourcify (chain id `5318007`), so the guard is published there. `hardhat-verify`'s bundled
+  `verify:sourcify` task still targets the removed Sourcify API v1, therefore `scripts/verify-all.js`
+  calls the Sourcify v2 endpoint (`POST /v2/verify/{chainId}/{address}`) directly.
+
+## Zero‑Protocol‑Capital Self‑Service
+
+The protocol never holds capital and never configures a user's settings. Every
+action below is signed by the user's own wallet:
+
+| Action | Contract | Function |
+| --- | --- | --- |
+| Open the sub‑account | `TrestleSubAccount` | `createSubAccount(mainVault, threshold, target, cooldown, maxDaily)` — permissionless, keyed to `msg.sender` |
+| **Change threshold / target / cooldown / daily cap** | `TrestleSubAccount` | `updateConfig(newThreshold, newTarget, newCooldown, newMaxDaily)` — the caller's own sub‑account only |
+| Turn the sub‑account on / off | `TrestleSubAccount` | `activate()` / `deactivate()` — the caller's own sub‑account only |
+| Fund the operational wallet | `TrestleSubAccount` | `depositTopUp()` — payable, credits `virtualBalances[msg.sender]` |
+| Fund the cross‑chain reserve | `TrestleMainVault` | `depositFor(user)` — payable, credits `balances[user]` |
+| Withdraw unused funds | `TrestleMainVault` / `TrestleSubAccount` | `withdraw(amount)` — only the owner of the funds |
+| Set the daily top‑up cap | `TrestleMainVault` | `setMyDailyRequestLimit(limit)` |
+| Register + subscribe | `TrestleReactiveGuard` | `registerSubAccount(user)`, `setupSubscription(user, maxDailyRefills, cooldown)` |
+| Pause / resume | `TrestleReactiveGuard` | `pauseSubscription(user)`, `updateSubscription(user, active, maxDailyRefills, cooldown)` |
+| Delegate an operator | `TrestleSubAccount` | `setOperator(operator, allowed)` — the user's own choice; the protocol owner is never one |
+
+Everything that remains owner‑only is protocol‑level wiring that is done once per
+deployment and is not part of any user's workflow: `setTopupBridge` (which bridge
+the vault uses), `setBridgeCreditor` (which receiver may credit the registry),
+`setCallbackRecipient` (which Base vault receives the reactive callback) and the
+protocol ceilings (`setLimits`, `setMaxDailyRefillsLimit`, `setMinCooldownPeriod`,
+`setMaxDailyRequestsLimit`). The owner can also force‑deactivate a sub‑account
+(`deactivateFor`) as a safety switch, but can never move a user's funds or raise
+a user's own limits.
+
+### In the UI
+
+The plugin's **Configuration Management** tab writes the settings **on-chain**
+first — `updateConfig` on the Unichain registry, `setMyDailyRequestLimit` on the
+Base vault and `updateSubscription` on the Lasna guard — and only then mirrors
+them into the worker's off‑chain index. The worker's database is an index for
+the UI, never the source of truth for what triggers a refill. A sub‑account card
+carries a **Settings** button that opens this editor, and a paused guard
+subscription stays paused when the settings are saved.
+
+#### Verified live
+
+A brand‑new address that had never touched the protocol
+(`0x55ee9745F3d8cC4022818d5F75e8250A88222D27`, *not* the deployer) completed the
+whole flow by itself: `createSubAccount` → `depositFor` → `setMyDailyRequestLimit`
+→ `updateConfig` → `depositTopUp` → `registerSubAccount` → `setupSubscription` →
+`spend` (which emitted `LowBalanceDetected`). Every receipt was signed by that
+address, and the resulting on‑chain state was its own (threshold 0.001 ETH,
+target 0.003 ETH, cooldown 600 s, daily cap 5).
+
+A refill is paid from the requesting user's own reserve: `releaseTopup` debits
+`balances[subAccount]` and forwards the amount plus the CCIP fee to the bridge, so
+one user's reserve can never fund another user's refill.
+
+### Testnet notes (Base Sepolia ↔ Unichain Sepolia)
+
+The two testnet AMM markets are not arbitraged against each other: the Base
+Sepolia WETH/USDC pool quotes ~5,900 USDC per ETH while the Unichain Sepolia
+pool quotes ~30,000 USDC per ETH. A cross-chain top-up therefore converts the
+user's ETH into USDC at the source price and back into ETH at the destination
+price, so the amount credited on Unichain is the destination-market value of
+what was bridged, capped by the requested amount:
+
+- `TrestleCCIPBridge` swaps the incoming ETH with an exact-input swap bounded by
+  `MAX_SQRT_RATIO - 1` (a zero price limit is rejected by Uniswap V3 with
+  `SPL`) and enforces a slippage floor, `minUsdcPerEth`, that the owner can
+  lower when the source market trades below it.
+- `TrestleCCIPReceiver` sells the USDC it received with an exact-input swap and
+  credits the ETH it actually bought. It never demands a fixed output, because
+  reverting would strand the whole CCIP message. The surplus stays in the
+  receiver (`requestSurplusWeth`).
+- On a chain pair whose two markets agree (mainnet), the credited amount is the
+  requested amount minus the CCIP fee and the AMM fee tier.
+
+The deployed Unichain Sepolia pool also rejects the canonical
+`MIN_SQRT_RATIO + 1` limit with `SPL`, so the receiver derives its price limit
+from the pool's current price instead.
+
 ## Features
 
 ### Per‑User Configuration
@@ -75,7 +190,7 @@ ORIGIN_CHAIN_ID=1301
 
 # Reactive Guard & Callback
 REACTIVE_CALLBACK_PROXY_BASE_SEPOLIA=0x476F44b11F5C942c58f4c8E3d0300E5710743585
-REACTIVE_GUARD_ADDRESS=0xf22e65B24B3236B6B4983e81792541139Df6e3Dc
+REACTIVE_GUARD_ADDRESS=0x93b1152F710d325154bF7A095c7509DA173DA25F
 
 # Sub‑Account Configuration
 SUBACCOUNT_THRESHOLD_WEI=1000000000000000        # 0.000001 ETH
@@ -133,6 +248,17 @@ npm run setup:baseSepolia
 
 # Configure Lasna contracts
 npm run setup:lasna
+```
+
+#### Explorer verification
+```bash
+# Verify the deployed contracts on each chain's explorer.
+# Constructor arguments are read from contracts/deployments/*.json, so they always
+# match the addresses that are actually live on-chain.
+cd contracts
+npx hardhat run scripts/verify-all.js --network baseSepolia      # Etherscan V2
+npx hardhat run scripts/verify-all.js --network unichainSepolia  # Blockscout (async queue)
+npx hardhat run scripts/verify-all.js --network lasnaTestnet     # Sourcify v2 (Reactscan)
 ```
 
 ## How It Works

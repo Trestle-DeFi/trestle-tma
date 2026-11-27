@@ -43,7 +43,8 @@ module.exports = {
         network: "baseSepolia",
         chainId: 84532,
         urls: {
-          apiURL: "https://api-sepolia.basescan.org/api",
+          // Etherscan V2 unified API (the legacy per-chain V1 basescan endpoint now returns NOTOK)
+          apiURL: "https://api.etherscan.io/v2/api",
           browserURL: "https://sepolia.basescan.org",
         },
       },
@@ -70,6 +71,9 @@ module.exports = {
     ],
   },
   sourcify: {
-    enabled: false,
+    // Lasna's Reactscan explorer reads verified sources from Sourcify (chain id 5318007)
+    enabled: true,
+    apiUrl: "https://sourcify.dev/server",
+    browserUrl: "https://repo.sourcify.dev",
   },
 };
