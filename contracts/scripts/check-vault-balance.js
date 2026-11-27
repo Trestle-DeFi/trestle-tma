@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 function readDeployment(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
@@ -8,11 +11,11 @@ function readDeployment(path) {
 async function main() {
   const vaultInfo = readDeployment("./deployments/baseSepolia-TrestleMainVault.json");
   const vaultAddress = vaultInfo.address;
-  const vault = await hre.ethers.getContractAt("TrestleMainVault", vaultAddress);
-  const balance = await hre.ethers.provider.getBalance(vaultAddress);
+  const vault = await ethers.getContractAt("TrestleMainVault", vaultAddress);
+  const balance = await ethers.provider.getBalance(vaultAddress);
   console.log("Vault address:", vaultAddress);
   console.log("Vault balance (wei):", balance.toString());
-  console.log("Vault balance (ETH):", hre.ethers.formatEther(balance));
+  console.log("Vault balance (ETH):", ethers.formatEther(balance));
 }
 
 main().catch(console.error);

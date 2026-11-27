@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 function readDeployment(path) {
   return JSON.parse(fs.readFileSync(path, "utf8"));
@@ -16,9 +19,9 @@ async function main() {
   const receiverAddress = readDeployment(
     "./deployments/unichainSepolia-TrestleCCIPReceiver.json",
   ).address;
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
 
-  const vault = (await hre.ethers.getContractFactory("TrestleMainVault")).attach(
+  const vault = (await ethers.getContractFactory("TrestleMainVault")).attach(
     vaultAddress,
   );
   if ((await vault.topupBridge()) !== bridgeAddress) {
@@ -27,7 +30,7 @@ async function main() {
   }
 
   const bridge = (
-    await hre.ethers.getContractFactory("TrestleCCIPBridge")
+    await ethers.getContractFactory("TrestleCCIPBridge")
   ).attach(bridgeAddress);
   if ((await bridge.vault()) !== vaultAddress) {
     await (await bridge.setVault(vaultAddress)).wait();
@@ -55,8 +58,8 @@ async function main() {
   // Protocol capital is zero: the bridge never pays a CCIP fee out of its own
   // balance, it reserves the fee out of the user's funding instead.
   const feeQuote = await bridge.quoteFee();
-  console.log("Quoted CCIP fee per top-up:", hre.ethers.formatEther(feeQuote), "ETH (charged to the user's reserve)");
-  console.log("Bridge balance:", hre.ethers.formatEther(await hre.ethers.provider.getBalance(bridgeAddress)), "ETH");
+  console.log("Quoted CCIP fee per top-up:", ethers.formatEther(feeQuote), "ETH (charged to the user's reserve)");
+  console.log("Bridge balance:", ethers.formatEther(await ethers.provider.getBalance(bridgeAddress)), "ETH");
 
   // Every user funds their own reserve. This is a USER deposit made by the
   // signer, credited to the signer's own balance — not a protocol-owned pot

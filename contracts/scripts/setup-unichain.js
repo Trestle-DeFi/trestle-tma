@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 function readDeployment(path) {
   if (!fs.existsSync(path)) {
@@ -17,7 +20,7 @@ async function main() {
   const vaultAddress = readDeployment(
     "./deployments/baseSepolia-TrestleMainVault.json",
   ).address;
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
 
   if (deployer.address === vaultAddress) {
     throw new Error("Deployer and MainVault must be distinct addresses");
@@ -25,7 +28,7 @@ async function main() {
 
   // Guard against reading an address through the wrong RPC: every call below
   // targets Unichain Sepolia, where the sub-account must actually live.
-  const code = await hre.ethers.provider.getCode(subAccountAddress);
+  const code = await ethers.provider.getCode(subAccountAddress);
   if (code === "0x") {
     throw new Error(
       `No bytecode at ${subAccountAddress} on Unichain Sepolia. Check UNICHAIN_SEPOLIA_RPC.`,
@@ -33,7 +36,7 @@ async function main() {
   }
 
   const subAccount = (
-    await hre.ethers.getContractFactory("TrestleSubAccount")
+    await ethers.getContractFactory("TrestleSubAccount")
   ).attach(subAccountAddress);
 
   // Sub-accounts are permissionless: any address can open its own. The

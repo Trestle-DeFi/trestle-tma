@@ -1,4 +1,9 @@
-const { spawnSync } = require("child_process");
+import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Hardhat 3 ships its CLI next to the package entry point.
+const hardhatCli = join(dirname(fileURLToPath(import.meta.resolve("hardhat"))), "cli.js");
 
 const steps = [
   ["Unichain Sepolia sub-account", "unichainSepolia", "scripts/deploy-subaccount.js"],
@@ -20,7 +25,7 @@ function main() {
     console.log(`[${index + 1}/${steps.length}] ${label}...`);
     const result = spawnSync(
       process.execPath,
-      [require.resolve("hardhat/internal/cli/cli"), "run", script, "--network", network],
+      [hardhatCli, "run", script, "--network", network],
       { stdio: "inherit", env: process.env },
     );
     if (result.status !== 0) {

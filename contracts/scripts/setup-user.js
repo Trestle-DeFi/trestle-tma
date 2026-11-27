@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 /**
  * Set & Forget — complete self-service onboarding for ONE user.
@@ -41,16 +44,16 @@ function readDeployment(path) {
 function connect(rpcEnvVar, label) {
   const url = process.env[rpcEnvVar];
   if (!url) throw new Error(`Missing ${rpcEnvVar} in the environment`);
-  const provider = new hre.ethers.JsonRpcProvider(url);
+  const provider = new ethers.JsonRpcProvider(url);
   if (!process.env.PRIVATE_KEY) throw new Error("Missing PRIVATE_KEY in the environment");
-  const wallet = new hre.ethers.Wallet(process.env.PRIVATE_KEY, provider);
+  const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
   return { provider, wallet, label };
 }
 
 function envWei(name, fallback) {
   const raw = process.env[name];
   if (!raw) return fallback;
-  return hre.ethers.parseUnits(raw, "wei");
+  return ethers.parseUnits(raw, "wei");
 }
 
 async function main() {
@@ -74,23 +77,23 @@ async function main() {
   console.log("User address      :", user);
   console.log("Self-service mode :", isSelfService ? "yes" : "no (owner-assisted steps only)");
 
-  const threshold = envWei("SET_FORGET_THRESHOLD_WEI", hre.ethers.parseEther("0.005"));
-  const target = envWei("SET_FORGET_TARGET_WEI", hre.ethers.parseEther("0.01"));
+  const threshold = envWei("SET_FORGET_THRESHOLD_WEI", ethers.parseEther("0.005"));
+  const target = envWei("SET_FORGET_TARGET_WEI", ethers.parseEther("0.01"));
   const cooldown = Number(process.env.SET_FORGET_COOLDOWN_SECONDS || "300");
   const maxDaily = Number(process.env.SET_FORGET_MAX_DAILY_SPENDS || "10");
   const guardCooldown = Number(process.env.SET_FORGET_GUARD_COOLDOWN || "300");
   const maxDailyRefills = Number(process.env.SET_FORGET_MAX_DAILY_REFILLS || "5");
   const dailyRequests = Number(process.env.SET_FORGET_DAILY_REQUESTS || "10");
   const operationalWei = process.env.SET_FORGET_OPERATIONAL_WEI
-    ? hre.ethers.parseEther(process.env.SET_FORGET_OPERATIONAL_WEI)
+    ? ethers.parseEther(process.env.SET_FORGET_OPERATIONAL_WEI)
     : null;
   const reserveWei = process.env.SET_FORGET_RESERVE_WEI
-    ? hre.ethers.parseEther(process.env.SET_FORGET_RESERVE_WEI)
+    ? ethers.parseEther(process.env.SET_FORGET_RESERVE_WEI)
     : null;
 
   // ── 1. Unichain: open the sub-account and fund the operational wallet ────
   console.log("\n--- 1/3  Unichain Sepolia: sub-account ---");
-  const registry = (await hre.ethers.getContractFactory("TrestleSubAccount"))
+  const registry = (await ethers.getContractFactory("TrestleSubAccount"))
     .connect(unichain.wallet)
     .attach(registryAddress);
 
@@ -114,7 +117,7 @@ async function main() {
     } else {
       const tx = await registry.depositTopUp({ value: operationalWei });
       await tx.wait();
-      console.log("✅ Operational wallet funded:", hre.ethers.formatEther(operationalWei), "ETH");
+      console.log("✅ Operational wallet funded:", ethers.formatEther(operationalWei), "ETH");
     }
   }
 
@@ -129,15 +132,15 @@ async function main() {
 
   // ── 2. Base: fund the reserve and set the daily request cap ─────────────
   console.log("\n--- 2/3  Base Sepolia: reserve ---");
-  const vault = (await hre.ethers.getContractFactory("TrestleMainVault"))
+  const vault = (await ethers.getContractFactory("TrestleMainVault"))
     .connect(base.wallet)
     .attach(vaultAddress);
-  const bridge = (await hre.ethers.getContractFactory("TrestleCCIPBridge"))
+  const bridge = (await ethers.getContractFactory("TrestleCCIPBridge"))
     .connect(base.wallet)
     .attach(bridgeAddress);
 
   const feeQuote = await bridge.quoteFee();
-  console.log("Quoted CCIP fee per top-up:", hre.ethers.formatEther(feeQuote), "ETH (paid by the user)");
+  console.log("Quoted CCIP fee per top-up:", ethers.formatEther(feeQuote), "ETH (paid by the user)");
 
   if (reserveWei && reserveWei > 0n) {
     if (!isSelfService) {
@@ -145,7 +148,7 @@ async function main() {
     } else {
       const tx = await vault.depositFor(user, { value: reserveWei });
       await tx.wait();
-      console.log("✅ Cross-chain reserve funded:", hre.ethers.formatEther(reserveWei), "ETH");
+      console.log("✅ Cross-chain reserve funded:", ethers.formatEther(reserveWei), "ETH");
     }
   }
 
@@ -157,12 +160,12 @@ async function main() {
     console.log("⚠️  Skipping the daily request cap: only the user can set their own cap");
   }
 
-  console.log("Reserve balance    :", hre.ethers.formatEther(await vault.balances(user)), "ETH");
+  console.log("Reserve balance    :", ethers.formatEther(await vault.balances(user)), "ETH");
   console.log("Effective daily cap:", (await vault.getEffectiveDailyLimit(user)).toString());
 
   // ── 3. Lasna: register and subscribe ─────────────────────────────────────
   console.log("\n--- 3/3  Lasna Testnet: reactive subscription ---");
-  const guard = (await hre.ethers.getContractFactory("TrestleReactiveGuard"))
+  const guard = (await ethers.getContractFactory("TrestleReactiveGuard"))
     .connect(lasna.wallet)
     .attach(guardAddress);
 
@@ -176,7 +179,7 @@ async function main() {
   }
 
   const registeredOwner = await guard.subAccountOwners(user);
-  if (registeredOwner === hre.ethers.ZeroAddress) {
+  if (registeredOwner === ethers.ZeroAddress) {
     if (!isSelfService && (await guard.owner()) !== signerAddress) {
       throw new Error("The signer is neither the user nor the guard owner — ask the user to register themselves");
     }

@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -9,7 +12,7 @@ function requiredEnv(name) {
 
 async function main() {
   console.log("=== Deploying TrestleMainVault to Base Sepolia ===");
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
   const callbackProxy = requiredEnv("REACTIVE_CALLBACK_PROXY_BASE_SEPOLIA");
   const reactiveSender =
     process.env.REACTIVE_GUARD_ADDRESS ||
@@ -21,7 +24,7 @@ async function main() {
   console.log("Reactive callback proxy:", callbackProxy);
   console.log("Reactive callback sender:", reactiveSender);
 
-  const TrestleMainVault = await hre.ethers.getContractFactory("TrestleMainVault");
+  const TrestleMainVault = await ethers.getContractFactory("TrestleMainVault");
   const mainVault = await TrestleMainVault.deploy(callbackProxy, reactiveSender);
   await mainVault.waitForDeployment();
   const address = await mainVault.getAddress();

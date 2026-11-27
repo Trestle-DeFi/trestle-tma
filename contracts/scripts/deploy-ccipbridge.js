@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 const BASE_SEPOLIA = {
   ccipRouter: "0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93",
@@ -16,13 +19,13 @@ function readDeployment(path) {
 
 async function main() {
   console.log("=== Deploying TrestleCCIPBridge to Base Sepolia ===");
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
   const vault = readDeployment("./deployments/baseSepolia-TrestleMainVault.json").address;
   // The receiver address is configured after the receiver is deployed because
   // the receiver constructor needs this bridge's address.
   const destinationReceiver = "0x0000000000000000000000000000000000000000";
 
-  const TrestleCCIPBridge = await hre.ethers.getContractFactory("TrestleCCIPBridge");
+  const TrestleCCIPBridge = await ethers.getContractFactory("TrestleCCIPBridge");
   const bridge = await TrestleCCIPBridge.deploy(
     vault,
     BASE_SEPOLIA.ccipRouter,

@@ -1,12 +1,15 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 async function main() {
   console.log("=== Deploying TrestleSubAccount to Unichain Sepolia ===");
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
   console.log("Deployer:", deployer.address);
 
-  const TrestleSubAccount = await hre.ethers.getContractFactory("TrestleSubAccount");
+  const TrestleSubAccount = await ethers.getContractFactory("TrestleSubAccount");
   const subAccount = await TrestleSubAccount.deploy();
   await subAccount.waitForDeployment();
   const address = await subAccount.getAddress();

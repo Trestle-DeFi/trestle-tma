@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 async function main() {
   console.log("=== Cross-Chain Configuration ===\\n");
@@ -18,7 +21,7 @@ async function main() {
   const subAccountAddress = subAccountDeploy.address;
   const mainVaultAddress = mainVaultDeploy.address;
   const reactiveGuardAddress = reactiveGuardDeploy.address;
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
   // The per-user key: the USER's address. The registry contract address is
   // only the log origin the guard watches.
   const operator = process.env.SUBACCOUNT_OPERATOR_ADDRESS || deployer.address;
@@ -30,7 +33,7 @@ async function main() {
 
   // 1. Set callback recipient on guard
   console.log("\\n--- Setting callback recipient on ReactiveGuard ---");
-  const reactiveGuard = await hre.ethers.getContractFactory("TrestleReactiveGuard");
+  const reactiveGuard = await ethers.getContractFactory("TrestleReactiveGuard");
   const guardContract = reactiveGuard.attach(reactiveGuardAddress);
   const currentRecipient = await guardContract.callbackRecipient();
   console.log("Current callbackRecipient:", currentRecipient);

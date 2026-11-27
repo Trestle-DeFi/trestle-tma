@@ -1,6 +1,9 @@
-const hre = require("hardhat");
-const fs = require("fs");
-const { ZeroAddress } = require("ethers");
+import hre from "hardhat";
+import fs from "node:fs";
+import { ZeroAddress } from "ethers";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 const UNICHAIN = {
   ccipRouter: "0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93",
@@ -17,14 +20,14 @@ function readDeployment(path) {
 
 async function main() {
   console.log("=== Deploying TrestleCCIPReceiver to Unichain Sepolia ===");
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
   const sourceBridge = readDeployment("./deployments/baseSepolia-TrestleCCIPBridge.json").address;
   const subAccount = readDeployment("./deployments/unichainSepolia-TrestleSubAccount.json").address;
 
-  const TrestleSubAccount = await hre.ethers.getContractFactory("TrestleSubAccount");
+  const TrestleSubAccount = await ethers.getContractFactory("TrestleSubAccount");
   const subAccountContract = TrestleSubAccount.attach(subAccount);
 
-  const TrestleCCIPReceiver = await hre.ethers.getContractFactory("TrestleCCIPReceiver");
+  const TrestleCCIPReceiver = await ethers.getContractFactory("TrestleCCIPReceiver");
   const receiver = await TrestleCCIPReceiver.deploy(
     sourceBridge,
     UNICHAIN.ccipRouter,

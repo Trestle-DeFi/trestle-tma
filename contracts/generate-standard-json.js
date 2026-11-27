@@ -1,10 +1,11 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const contractsDir = __dirname;
+const contractsDir = path.dirname(fileURLToPath(import.meta.url));
 const nodeModulesDir = path.join(contractsDir, "node_modules");
 
-const SOLC_SETTINGS = {
+export const SOLC_SETTINGS = {
   optimizer: { enabled: true, runs: 200 },
   evmVersion: "cancun",
   viaIR: true,
@@ -64,7 +65,16 @@ function collectSources(entryKey) {
   return sources;
 }
 
-const contracts = [
+/** Builds the Solidity standard-JSON input for one contract source file. */
+export function buildStandardJson(key) {
+  return {
+    language: "Solidity",
+    sources: collectSources(key),
+    settings: SOLC_SETTINGS,
+  };
+}
+
+export const contracts = [
   {
     name: "TrestleSubAccount",
     key: "src/TrestleSubAccount.sol",
@@ -97,24 +107,27 @@ const contracts = [
   },
 ];
 
-for (const { name, key, chain, deployment } of contracts) {
-  const deploymentPath = path.join(contractsDir, "deployments", deployment);
-  const address = fs.existsSync(deploymentPath)
-    ? JSON.parse(fs.readFileSync(deploymentPath, "utf8")).address
-    : "";
+function main() {
+  for (const { name, key, chain, deployment } of contracts) {
+    const deploymentPath = path.join(contractsDir, "deployments", deployment);
+    const address = fs.existsSync(deploymentPath)
+      ? JSON.parse(fs.readFileSync(deploymentPath, "utf8")).address
+      : "";
 
-  const standardJson = {
-    language: "Solidity",
-    sources: collectSources(key),
-    settings: SOLC_SETTINGS,
-  };
+    const standardJson = buildStandardJson(key);
 
-  const outputPath = path.join(contractsDir, `standard-json-${name}.json`);
-  fs.writeFileSync(outputPath, JSON.stringify(standardJson, null, 2));
+    const outputPath = path.join(contractsDir, `standard-json-${name}.json`);
+    fs.writeFileSync(outputPath, JSON.stringify(standardJson, null, 2));
 
-  console.log(`Generated ${outputPath}`);
-  console.log(`  contract: ${name} | chain: ${chain} | address: ${address}`);
-  console.log(`  sources: ${Object.keys(standardJson.sources).length}`);
+    console.log(`Generated ${outputPath}`);
+    console.log(`  contract: ${name} | chain: ${chain} | address: ${address}`);
+    console.log(`  sources: ${Object.keys(standardJson.sources).length}`);
+  }
+
+  console.log("\nUpload each standard-json-*.json to the matching explorer (Sourcify v2 / Blockscout / Etherscan).");
 }
 
-console.log("\nUpload each standard-json-*.json to the matching explorer (Sourcify v2 / Blockscout / Etherscan).");
+// Only regenerate the payloads when this file is executed directly.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

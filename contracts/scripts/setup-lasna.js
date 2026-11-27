@@ -1,5 +1,8 @@
-const hre = require("hardhat");
-const fs = require("fs");
+import hre from "hardhat";
+import fs from "node:fs";
+
+const connection = await hre.network.create();
+const { ethers } = connection;
 
 function readDeployment(path) {
   if (!fs.existsSync(path)) {
@@ -19,11 +22,11 @@ async function main() {
   const vaultAddress = readDeployment(
     "./deployments/baseSepolia-TrestleMainVault.json",
   ).address;
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await ethers.getSigners();
 
   // Everything below runs on Lasna; the sub-account and vault addresses are
   // configuration values only and must not be read through this RPC.
-  const code = await hre.ethers.provider.getCode(guardAddress);
+  const code = await ethers.provider.getCode(guardAddress);
   if (code === "0x") {
     throw new Error(
       `No bytecode at ${guardAddress} on Lasna. Check LASNA_TESTNET_RPC.`,
@@ -31,7 +34,7 @@ async function main() {
   }
 
   const guard = (
-    await hre.ethers.getContractFactory("TrestleReactiveGuard")
+    await ethers.getContractFactory("TrestleReactiveGuard")
   ).attach(guardAddress);
 
   // The guard subscribes as origin to the shared sub-account contract, so a

@@ -1,6 +1,9 @@
-const hre = require("hardhat");
-const fs = require("fs");
-const { ethers } = require("ethers");
+import hre from "hardhat";
+import fs from "node:fs";
+import { ethers } from "ethers";
+
+const connection = await hre.network.create();
+const { ethers: hardhatEthers } = connection;
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -10,7 +13,7 @@ function requiredEnv(name) {
 
 async function main() {
   console.log("=== Deploying TrestleReactiveGuard to Lasna Testnet ===");
-  const [deployer] = await hre.ethers.getSigners();
+  const [deployer] = await hardhatEthers.getSigners();
   const originChainId = process.env.ORIGIN_CHAIN_ID || "1301";
   const originContract =
     process.env.SUBACCOUNT_ADDRESS ||
@@ -26,7 +29,7 @@ async function main() {
   console.log("Origin contract:", originContract);
   console.log("Low-balance topic:", topic);
 
-  const TrestleReactiveGuard = await hre.ethers.getContractFactory("TrestleReactiveGuard");
+  const TrestleReactiveGuard = await hardhatEthers.getContractFactory("TrestleReactiveGuard");
   const reactiveGuard = await TrestleReactiveGuard.deploy(originChainId, originContract, topic);
   await reactiveGuard.waitForDeployment();
   const address = await reactiveGuard.getAddress();

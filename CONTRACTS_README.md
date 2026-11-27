@@ -40,9 +40,9 @@ Notes:
   source is attached only after the queue drains, so `getsourcecode` can still return an empty
   source immediately after submitting.
 - Lasna's Reactscan explorer has no Etherscan‑style API — it renders contract sources straight
-  from Sourcify (chain id `5318007`), so the guard is published there. `hardhat-verify`'s bundled
-  `verify:sourcify` task still targets the removed Sourcify API v1, therefore `scripts/verify-all.js`
-  calls the Sourcify v2 endpoint (`POST /v2/verify/{chainId}/{address}`) directly.
+  from Sourcify (chain id `5318007`), so the guard is published there. `scripts/verify-all.js`
+  calls the Sourcify v2 endpoint (`POST /v2/verify/{chainId}/{address}`) directly — the same API
+  Hardhat 3's `hardhat-verify` plugin uses — and reports the `exact_match` proof.
 
 ## Zero‑Protocol‑Capital Self‑Service
 
@@ -209,6 +209,14 @@ MAX_DAILY_REFILLS_0x9280b24542a52cEE54a78dB65A497D8BeC4BAB94=5
 ```
 
 ### Development & Testing
+
+#### Toolchain
+The contract package uses **Hardhat 3** (`hardhat`, `hardhat-ethers`, `hardhat-verify`,
+`hardhat-foundry`) on Node 24. Hardhat 3 is ESM‑first, so `contracts/package.json` declares
+`"type": "module"` and every script under `contracts/scripts/` is an ES module that opens an
+explicit network connection (`await hre.network.create()`). The compiler settings are unchanged
+(`solc 0.8.37`, `viaIR`, optimizer runs `200`, `evmVersion cancun`), so the compiled bytecode is
+identical to the already‑deployed contracts.
 
 #### Testing
 ```bash

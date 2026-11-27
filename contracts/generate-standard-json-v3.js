@@ -1,1 +1,1 @@
-require("./generate-standard-json");
+import "./generate-standard-json.js";

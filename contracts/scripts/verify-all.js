@@ -14,42 +14,93 @@
  *   unichainSepolia-> Blockscout (unichain-sepolia.blockscout.com), async verification queue
  *   lasnaTestnet   -> Sourcify v2, which is what the Reactscan explorer serves sources from
  */
-const fs = require("fs");
-const path = require("path");
-const hre = require("hardhat");
+import hre from "hardhat";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { AbiCoder } from "ethers";
+import { buildStandardJson } from "../generate-standard-json.js";
+
+const contractsDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const SOURCIFY_API = "https://sourcify.dev/server";
 const SOURCIFY_BROWSER = "https://repo.sourcify.dev";
+const BLOCKSCOUT_API = "https://unichain-sepolia.blockscout.com/api";
+const BLOCKSCOUT_BROWSER = "https://unichain-sepolia.blockscout.com";
+// The compiler the contracts were deployed with (hardhat.config.js pins 0.8.37).
+// Sourcify wants the bare version, the Etherscan-compatible APIs want the "v" prefix.
+const COMPILER_VERSION = "0.8.37+commit.f401782d";
+const COMPILER_VERSION_V2 = "v0.8.37+commit.f401782d";
+
+const connection = await hre.network.create();
+const chainId = String(connection.networkConfig.chainId);
+const networkName = connection.networkName;
 
 /** Reads the Solidity standard-JSON input (the exact compiler input used for the deployment). */
 function loadStandardJsonInput(contractName) {
-  const buildInfoDir = path.join(__dirname, "..", "artifacts", "build-info");
-  for (const file of fs.readdirSync(buildInfoDir)) {
-    const buildInfo = JSON.parse(fs.readFileSync(path.join(buildInfoDir, file), "utf8"));
-    const sources = buildInfo.input?.sources || {};
-    if (Object.keys(sources).some((source) => source.endsWith(`/${contractName}.sol`))) {
-      // solcLongVersion carries the commit hash, e.g. "0.8.37+commit.f401782d"
-      return { stdJsonInput: buildInfo.input, compilerVersion: buildInfo.solcLongVersion };
+  const file = path.join(contractsDir, `standard-json-${contractName}.json`);
+  if (fs.existsSync(file)) {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  }
+  return buildStandardJson(`src/${contractName}.sol`);
+}
+
+/**
+ * ABI-encodes the constructor arguments that were recorded at deployment time.
+ * The Etherscan-compatible APIs expect the hex string without the "0x" prefix.
+ */
+function encodeConstructorArgs(contractName, constructorArgs) {
+  const artifactPath = path.join(
+    contractsDir,
+    "artifacts",
+    "src",
+    `${contractName}.sol`,
+    `${contractName}.json`,
+  );
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+  const constructor = artifact.abi.find((entry) => entry.type === "constructor");
+  const types = (constructor?.inputs ?? []).map((input) => input.type);
+  if (types.length === 0) {
+    return "";
+  }
+  return AbiCoder.defaultAbiCoder().encode(types, constructorArgs).replace(/^0x/, "");
+}
+
+/** Retries transient explorer failures (connection timeouts, HTTP 429 rate limits). */
+async function withRetry(label, action, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await action();
+    } catch (error) {
+      lastError = error;
+      const transient = /network request failed|timeout|429|rate limit|ECONNRESET|fetch failed/i.test(
+        error.message,
+      );
+      if (!transient || attempt === attempts) {
+        throw error;
+      }
+      console.warn(`  ${label} failed (${error.message.split("\n")[0]}) - retrying in ${attempt * 15}s...`);
+      await new Promise((resolve) => setTimeout(resolve, attempt * 15000));
     }
   }
-  throw new Error(`No build-info found containing ${contractName}.sol - run "npx hardhat compile" first.`);
+  throw lastError;
 }
 
 /**
  * Verifies a contract through Sourcify's v2 API.
- * hardhat-verify's own "verify:sourcify" task still targets the removed Sourcify API v1,
- * and Lasna's Reactscan explorer serves contract sources straight from Sourcify.
+ * Lasna's Reactscan explorer serves contract sources straight from Sourcify, and
+ * Sourcify is the reliable mirror for Unichain (Blockscout rate-limits heavily).
  */
 async function verifyViaSourcify(deployment, contractName) {
-  const chainId = String(hre.network.config.chainId);
-  const { stdJsonInput, compilerVersion } = loadStandardJsonInput(contractName);
+  const stdJsonInput = loadStandardJsonInput(contractName);
 
   const submit = await fetch(`${SOURCIFY_API}/v2/verify/${chainId}/${deployment.address}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": "trestle-verify-script/1.0" },
     body: JSON.stringify({
       stdJsonInput,
-      compilerVersion,
+      compilerVersion: COMPILER_VERSION,
       contractIdentifier: `src/${contractName}.sol:${contractName}`,
       creationTransactionHash: deployment.txHash,
     }),
@@ -86,9 +137,101 @@ async function verifyViaSourcify(deployment, contractName) {
   throw new Error("Sourcify verification did not complete in time");
 }
 
+/** Verifies a contract through the Etherscan V2 unified API (Base Sepolia). */
+async function verifyViaEtherscan(deployment, contractName) {
+  const stdJsonInput = loadStandardJsonInput(contractName);
+  const constructorArguments = encodeConstructorArgs(contractName, deployment.constructorArgs ?? []);
+  const contractIdentifier = `src/${contractName}.sol:${contractName}`;
+  const { etherscan } = connection.verification;
+
+  let guid;
+  try {
+    guid = await etherscan.verify({
+      contractAddress: deployment.address,
+      compilerInput: stdJsonInput,
+      contractName: contractIdentifier,
+      compilerVersion: COMPILER_VERSION_V2,
+      constructorArguments,
+    });
+  } catch (error) {
+    // HHE80022: the contract is already verified on the explorer.
+    if (error.message.includes("already verified")) {
+      console.log(`Already verified on Etherscan: ${await etherscan.getContractUrl(deployment.address)}`);
+      return true;
+    }
+    throw error;
+  }
+  const status = await etherscan.pollVerificationStatus(guid, deployment.address, contractIdentifier);
+  if (!status.success) {
+    throw new Error(`Etherscan verification failed: ${status.message}`);
+  }
+  console.log(`Etherscan verified: ${await etherscan.getContractUrl(deployment.address)}`);
+  return true;
+}
+
+/** Verifies a contract through Blockscout's Etherscan-compatible API (Unichain Sepolia). */
+async function verifyViaBlockscout(deployment, contractName) {
+  const stdJsonInput = loadStandardJsonInput(contractName);
+  const constructorArguments = encodeConstructorArgs(contractName, deployment.constructorArgs ?? []);
+  const params = new URLSearchParams({
+    module: "contract",
+    action: "verify",
+    code: JSON.stringify(stdJsonInput),
+    compilerVersion: COMPILER_VERSION_V2,
+    constructorArgs: constructorArguments,
+  });
+
+  const submit = await fetch(`${BLOCKSCOUT_API}?${params}`, {
+    headers: { "User-Agent": "trestle-verify-script/1.0" },
+  });
+  const submitted = await submit.json().catch(() => ({}));
+  if (submitted.status === "0") {
+    throw new Error(
+      `Blockscout rejected the submission: ${String(submitted.result ?? JSON.stringify(submitted)).slice(0, 200)}`,
+    );
+  }
+  const guid = submitted.result;
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    const check = new URLSearchParams({
+      module: "contract",
+      action: "checkverifystatus",
+      guid: String(guid),
+    });
+    const status = await fetch(`${BLOCKSCOUT_API}?${check}`, {
+      headers: { "User-Agent": "trestle-verify-script/1.0" },
+    });
+    const result = await status.json().catch(() => ({}));
+    const message = String(result.result ?? "").toLowerCase();
+    if (message.includes("already verified")) {
+      console.log("Already verified on Blockscout");
+      return true;
+    }
+    if (message.includes("unknown uid")) {
+      // Blockscout accepts the request but does not queue it when the contract
+      // is already verified, so there is no job to poll.
+      console.log("Blockscout did not queue the request (the contract is already verified)");
+      return true;
+    }
+    if (message.includes("pending") || message.includes("in queue")) {
+      console.log(`  Blockscout verification pending (${attempt + 1})...`);
+      continue;
+    }
+    if (message.includes("success") || message.includes("verified")) {
+      console.log(`Blockscout verified: ${BLOCKSCOUT_BROWSER}/address/${deployment.address}#code`);
+      return true;
+    }
+    throw new Error(
+      `Blockscout verification failed: ${String(result.result ?? JSON.stringify(result)).slice(0, 200)}`,
+    );
+  }
+  throw new Error("Blockscout verification did not complete in time");
+}
+
 const PLAN = {
   baseSepolia: {
-    tasks: ["verify:etherscan"], // Etherscan V2 unified API (sepolia.basescan.org)
+    tasks: [{ name: "etherscan", critical: true }], // Etherscan V2 unified API (sepolia.basescan.org)
     contracts: [
       { file: "baseSepolia-TrestleMainVault.json", contract: "TrestleMainVault" },
       { file: "baseSepolia-TrestleCCIPBridge.json", contract: "TrestleCCIPBridge" },
@@ -99,7 +242,7 @@ const PLAN = {
     // Blockscout is best-effort here: its API rate-limits aggressively (HTTP 429).
     tasks: [
       { name: "sourcify", critical: true },
-      { name: "verify:blockscout", critical: false },
+      { name: "blockscout", critical: false },
     ],
     contracts: [
       { file: "unichainSepolia-TrestleSubAccount.json", contract: "TrestleSubAccount" },
@@ -112,30 +255,13 @@ const PLAN = {
   },
 };
 
-/**
- * Runs a hardhat-verify subtask, retrying transient explorer failures
- * (connection timeouts, HTTP 429 rate limits) a few times.
- */
-async function runVerifyTaskWithRetry(taskName, args, attempts = 3) {
-  let lastError;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      return await hre.run(taskName, args);
-    } catch (error) {
-      lastError = error;
-      const transient = /network request failed|timeout|429|rate limit/i.test(error.message);
-      if (!transient || attempt === attempts) {
-        throw error;
-      }
-      console.warn(`  ${taskName} failed (${error.message.split("\n")[0]}) - retrying in ${attempt * 15}s...`);
-      await new Promise((resolve) => setTimeout(resolve, attempt * 15000));
-    }
-  }
-  throw lastError;
-}
+const VERIFIERS = {
+  sourcify: verifyViaSourcify,
+  etherscan: verifyViaEtherscan,
+  blockscout: verifyViaBlockscout,
+};
 
 async function main() {
-  const networkName = hre.network.name;
   const plan = PLAN[networkName];
   if (!plan) {
     throw new Error(`No verification plan for network "${networkName}"`);
@@ -143,22 +269,14 @@ async function main() {
 
   let failures = 0;
   for (const item of plan.contracts) {
-    const deploymentPath = path.join(__dirname, "..", "deployments", item.file);
+    const deploymentPath = path.join(contractsDir, "deployments", item.file);
     const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
     for (const task of plan.tasks) {
-      const taskName = typeof task === "string" ? task : task.name;
-      const critical = typeof task === "string" ? true : task.critical !== false;
+      const taskName = task.name;
+      const critical = task.critical !== false;
       console.log(`\n=== Verifying ${item.contract} @ ${deployment.address} on ${networkName} (${taskName}) ===`);
       try {
-        if (taskName === "sourcify") {
-          await verifyViaSourcify(deployment, item.contract);
-        } else {
-          await runVerifyTaskWithRetry(taskName, {
-            address: deployment.address,
-            contract: `src/${item.contract}.sol:${item.contract}`,
-            constructorArgsParams: deployment.constructorArgs,
-          });
-        }
+        await withRetry(taskName, () => VERIFIERS[taskName](deployment, item.contract));
         console.log(`OK ${item.contract} ${deployment.address} (${taskName})`);
       } catch (error) {
         if (critical) {
@@ -166,7 +284,7 @@ async function main() {
           console.error(`FAILED ${item.contract} ${deployment.address} (${taskName}): ${error.message}`);
         } else {
           console.warn(`SKIPPED ${item.contract} (${taskName}): ${error.message}`);
-          console.warn(`  Check manually: https://unichain-sepolia.blockscout.com/address/${deployment.address}#code`);
+          console.warn(`  Check manually: ${BLOCKSCOUT_BROWSER}/address/${deployment.address}#code`);
         }
       }
     }
