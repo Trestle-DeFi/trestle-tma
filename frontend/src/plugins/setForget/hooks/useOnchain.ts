@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi';
-import { parseEther, formatEther, type Address } from 'viem';
-import { SET_FORGET_CONTRACTS } from '../../../config/contracts';
+import { ChainMismatchError, parseEther, formatEther, type Address } from 'viem';
+import { SET_FORGET_CONTRACTS, CHAIN_CONFIG, CHAIN_KEY_BY_ID } from '../../../config/contracts';
 import { SET_FORGET_CHAIN_FALLBACK_LIMITS, type SetForgetChainLimits } from '../config';
 
 // ABIs below expose only the per-user, self-service entry points. Every one of
@@ -397,9 +397,9 @@ export const useOnchain = () => {
     return user;
   };
 
-  const switchTo = async (chainId: number) => {
+  const switchTo = async (chainId: number, force = false) => {
     if (!currentClient) throw new Error('No wallet client available');
-    if (currentClient.chain?.id !== chainId) {
+    if (force || currentClient.chain?.id !== chainId) {
       await switchChainAsync({ chainId });
     }
   };
@@ -412,20 +412,57 @@ export const useOnchain = () => {
     args?: readonly unknown[];
     value?: bigint;
   }) => {
+    const send = () =>
+      writeContractAsync({
+        // The chain is pinned to the contract's chain. Without it a rejected
+        // chain switch would silently send the transaction to whatever chain
+        // the wallet is on — e.g. a Lasna guard call executed on Unichain,
+        // where it hits an address without code and burns gas for nothing.
+        // Pinning it makes wagmi refuse the write instead.
+        chainId: params.chainId,
+        abi: params.abi as never,
+        address: params.address,
+        functionName: params.functionName,
+        args: (params.args ?? []) as never,
+        ...(params.value !== undefined ? { value: params.value } : {}),
+      });
+
     await switchTo(params.chainId);
-    return writeContractAsync({
-      // The chain is pinned to the contract's chain. Without it a rejected
-      // chain switch would silently send the transaction to whatever chain the
-      // wallet is on — e.g. a Lasna guard call executed on Unichain, where it
-      // hits an address without code and burns gas for nothing. Pinning it
-      // makes wagmi refuse the write instead.
-      chainId: params.chainId,
-      abi: params.abi as never,
-      address: params.address,
-      functionName: params.functionName,
-      args: (params.args ?? []) as never,
-      ...(params.value !== undefined ? { value: params.value } : {}),
-    });
+
+    try {
+      return await send();
+    } catch (err: any) {
+      // The wallet did not actually move to the target chain — the switch
+      // prompt was dismissed, or the wallet reported the old chain. Ask once
+      // more and retry, so a single dismissed prompt does not abort a
+      // multi-chain save.
+      const message = String(err?.shortMessage ?? err?.message ?? err);
+      const isChainMismatch =
+        err instanceof ChainMismatchError ||
+        message.includes('does not match the target chain') ||
+        message.includes('ChainMismatch');
+      if (!isChainMismatch) throw err;
+
+      await switchTo(params.chainId, true);
+      try {
+        return await send();
+      } catch (retryErr: any) {
+        const retryMessage = String(retryErr?.shortMessage ?? retryErr?.message ?? retryErr);
+        if (
+          retryErr instanceof ChainMismatchError ||
+          retryMessage.includes('does not match the target chain') ||
+          retryMessage.includes('ChainMismatch')
+        ) {
+          const chain = CHAIN_CONFIG[CHAIN_KEY_BY_ID[params.chainId]];
+          throw new Error(
+            `Your wallet is still on chain ${currentClient?.chain?.id}. ` +
+              `Switch it to ${chain?.name ?? `chain ${params.chainId}`} ` +
+              `(id ${params.chainId}) and approve the prompt, then try again.`,
+          );
+        }
+        throw retryErr;
+      }
+    }
   };
 
   /** Create the caller's own sub-account on the Unichain registry. */

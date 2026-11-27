@@ -75,6 +75,13 @@ export const CHAIN_CONFIG = {
 } as const;
 
 export type ChainKey = keyof typeof CHAIN_CONFIG;
+
+/** Maps a chain id to its CHAIN_CONFIG key, for human-readable labels. */
+export const CHAIN_KEY_BY_ID = Object.fromEntries(
+  (Object.entries(CHAIN_CONFIG) as [ChainKey, (typeof CHAIN_CONFIG)[ChainKey]][]).map(
+    ([key, chain]) => [chain.id, key],
+  ),
+) as Record<number, ChainKey>;
 export const SUPPORTED_CHAIN_IDS = Object.values(CHAIN_CONFIG).map(c => c.id) as readonly number[];
 export const DEFAULT_CHAIN = CHAIN_CONFIG.amoy.id;
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { parseEther } from "viem";
+import { ChainMismatchError, parseEther } from "viem";
 import { useOnchain } from "./useOnchain";
 import { SET_FORGET_CONTRACTS } from "../../../config/contracts";
 
@@ -135,6 +135,59 @@ describe("useOnchain — self-service on-chain configuration", () => {
         args: [7n],
       }),
     );
+  });
+
+  it("re-prompts and retries when the wallet does not actually switch chains", async () => {
+    // The wallet stayed on Base, so the guard write was refused. The hook
+    // asks for the switch again and retries instead of failing the save.
+    mockWriteContractAsync
+      .mockRejectedValueOnce(
+        new ChainMismatchError({
+          currentChainId: 84532,
+          chain: { id: 5318007, name: "Lasna Testnet" } as never,
+        }),
+      )
+      .mockResolvedValueOnce("0xhash");
+
+    const { result } = renderHook(() => useOnchain());
+
+    await act(async () => {
+      await result.current.updateSelfSubscription({
+        maxDaily: 10,
+        cooldown: 300,
+        isActive: true,
+      });
+    });
+
+    expect(mockSwitchChainAsync).toHaveBeenCalledTimes(2);
+    expect(mockWriteContractAsync).toHaveBeenCalledTimes(2);
+    expect(mockWriteContractAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        functionName: "updateSubscription",
+        chainId: SET_FORGET_CONTRACTS.reactiveGuard.chainId,
+      }),
+    );
+  });
+
+  it("explains which chain the wallet has to be on when the switch fails twice", async () => {
+    mockWriteContractAsync.mockRejectedValue(
+      new ChainMismatchError({
+        currentChainId: 84532,
+        chain: { id: 5318007, name: "Lasna Testnet" } as never,
+      }),
+    );
+
+    const { result } = renderHook(() => useOnchain());
+
+    await act(async () => {
+      await expect(
+        result.current.updateSelfSubscription({
+          maxDaily: 10,
+          cooldown: 300,
+          isActive: true,
+        }),
+      ).rejects.toThrow(/Lasna Testnet/);
+    });
   });
 
   it("refuses to act without a connected wallet", async () => {
