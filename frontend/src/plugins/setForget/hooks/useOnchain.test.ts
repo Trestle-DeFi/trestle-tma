@@ -42,6 +42,9 @@ describe("useOnchain — self-service on-chain configuration", () => {
         address: SET_FORGET_CONTRACTS.subAccount.address,
         functionName: "updateConfig",
         args: [parseEther("0.01"), parseEther("0.05"), 300n, 10n],
+        // The write is pinned to the registry's chain: a rejected chain switch
+        // must not send the transaction to the chain the wallet is on.
+        chainId: SET_FORGET_CONTRACTS.subAccount.chainId,
       }),
     );
     // The registry lives on Unichain Sepolia.
@@ -92,6 +95,9 @@ describe("useOnchain — self-service on-chain configuration", () => {
         address: SET_FORGET_CONTRACTS.reactiveGuard.address,
         functionName: "updateSubscription",
         args: [USER, false, 5n, 600n],
+        // Guard writes are pinned to Lasna so a rejected chain switch cannot
+        // execute them on Unichain or Base.
+        chainId: SET_FORGET_CONTRACTS.reactiveGuard.chainId,
       }),
     );
     expect(mockSwitchChainAsync).toHaveBeenCalledWith({

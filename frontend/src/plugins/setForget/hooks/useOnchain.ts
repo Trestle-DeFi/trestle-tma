@@ -414,6 +414,12 @@ export const useOnchain = () => {
   }) => {
     await switchTo(params.chainId);
     return writeContractAsync({
+      // The chain is pinned to the contract's chain. Without it a rejected
+      // chain switch would silently send the transaction to whatever chain the
+      // wallet is on — e.g. a Lasna guard call executed on Unichain, where it
+      // hits an address without code and burns gas for nothing. Pinning it
+      // makes wagmi refuse the write instead.
+      chainId: params.chainId,
       abi: params.abi as never,
       address: params.address,
       functionName: params.functionName,
